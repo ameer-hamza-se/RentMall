@@ -1,0 +1,38 @@
+{
+  "name": "rentmall",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently --kill-others --names api,web \"npm run dev:api\" \"npm run dev:web\"",
+    "build": "npm run build --workspace @rentmall/frontend",
+    "lint": "eslint .",
+    "preview": "npm run preview --workspace @rentmall/frontend --",
+    "dev:api": "npm run dev --workspace @rentmall/api",
+    "dev:web": "npm run dev --workspace @rentmall/frontend --",
+    "test": "npm test --workspace @rentmall/api",
+    "db:check": "npm run db:check --workspace @rentmall/api",
+    "check": "npm run lint && npm test && npm run build",
+    "server": "npm run dev:api"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "concurrently": "^9.2.1",
+    "eslint": "^10.14.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.7",
+    "globals": "^17.13.0"
+  },
+  "engines": {
+    "node": ">=24.12.0"
+  },
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "overrides": {
+    "@firebase/firestore": {
+      "@grpc/grpc-js": "^1.14.7"
+    }
+  }
+}

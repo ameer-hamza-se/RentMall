@@ -1,0 +1,76 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /rentmallProfiles/{uid} {
+      function isOwner() {
+        return request.auth != null && request.auth.uid == uid;
+      }
+
+      function validProfile(data) {
+        return data.keys().hasAll(['firstName', 'lastName', 'name', 'address', 'phone', 'accountType', 'businessName'])
+          && data.keys().hasOnly(['firstName', 'lastName', 'name', 'address', 'phone', 'accountType', 'businessName', 'photo'])
+          && data.firstName is string && data.firstName.size() > 0 && data.firstName.size() <= 60
+          && data.lastName is string && data.lastName.size() > 0 && data.lastName.size() <= 60
+          && data.name == data.firstName + ' ' + data.lastName
+          && data.address is string && data.address.size() >= 5 && data.address.size() <= 250
+          && data.phone is string && data.phone.matches('[+]923[0-9]{9}')
+          && data.accountType in ['individual', 'business']
+          && data.businessName is string && data.businessName.size() <= 120
+          && (data.accountType == 'business' ? data.businessName.size() > 0 : data.businessName == '')
+          && (!('photo' in data) || (data.photo is string && data.photo.size() <= 200000
+                && data.photo.matches('data:image/jpeg;base64,[A-Za-z0-9+/]+=*')));
+      }
+
+      allow get: if isOwner();
+      allow create, update: if isOwner() && validProfile(request.resource.data);
+    }
+
+    match /rentmallAds/{adId} {
+      function validKeyword(value) {
+        return value is string && value.size() <= 40;
+      }
+
+      function validAd(data) {
+        return data.keys().hasAll(['ownerUid', 'title', 'summary', 'category', 'city', 'area', 'priceMinor', 'rateUnit',
+                                   'ownerType', 'terms', 'keywords', 'createdAt', 'available', 'imageCount'])
+          && data.keys().hasOnly(['ownerUid', 'title', 'summary', 'category', 'city', 'area', 'priceMinor', 'rateUnit',
+                                   'ownerType', 'terms', 'keywords', 'createdAt', 'available', 'imageCount'])
+          && data.ownerUid == request.auth.uid
+          && data.title is string && data.title.size() >= 3 && data.title.size() <= 90
+          && data.summary is string && data.summary.size() >= 10 && data.summary.size() <= 1500
+          && data.area is string && data.area.size() <= 60
+          && data.city == 'sahiwal'
+          && data.category in ['vehicles', 'sports-grounds', 'rooms', 'wearables', 'events', 'tools']
+          && data.rateUnit in ['hour', 'day', 'month']
+          && data.ownerType in ['individual', 'business']
+          && data.priceMinor is int && data.priceMinor >= 100 && data.priceMinor <= 999999900
+          && data.terms is string && data.terms.size() <= 400
+          && data.keywords is list && data.keywords.size() <= 5
+          && (data.keywords.size() < 1 || validKeyword(data.keywords[0]))
+          && (data.keywords.size() < 2 || validKeyword(data.keywords[1]))
+          && (data.keywords.size() < 3 || validKeyword(data.keywords[2]))
+          && (data.keywords.size() < 4 || validKeyword(data.keywords[3]))
+          && (data.keywords.size() < 5 || validKeyword(data.keywords[4]))
+          && data.createdAt == request.time && data.available == true
+          && data.imageCount is int && data.imageCount >= 0 && data.imageCount <= 5;
+      }
+
+      allow read: if true;
+      allow create: if request.auth != null && adId.matches('[1-8][0-9]{5}') && validAd(request.resource.data)
+        && exists(/databases/$(database)/documents/rentmallProfiles/$(request.auth.uid));
+      allow update: if request.auth != null && resource.data.ownerUid == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['available'])
+        && request.resource.data.available is bool;
+
+      match /media/{photoIndex} {
+        allow get: if exists(/databases/$(database)/documents/rentmallAds/$(adId));
+        allow create: if request.auth != null && photoIndex in ['0', '1', '2', '3', '4']
+          && getAfter(/databases/$(database)/documents/rentmallAds/$(adId)).data.ownerUid == request.auth.uid
+          && getAfter(/databases/$(database)/documents/rentmallAds/$(adId)).data.createdAt == request.time
+          && request.resource.data.keys().hasOnly(['image'])
+          && request.resource.data.image is string && request.resource.data.image.size() <= 120000
+          && request.resource.data.image.matches('data:image/jpeg;base64,[A-Za-z0-9+/]+=*');
+      }
+    }
+  }
+}
