@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
-import { categories, rateUnits } from '../../shared/catalog.js';
-import { maxKeywordLength, maxListingKeywords } from '../../shared/listing-discovery.js';
+import { useRef, useState } from 'react';
+import { Dialog } from '../../components/dialog.jsx';
+import { categories, rateUnits } from '../../../../shared/catalog.js';
+import { maxKeywordLength, maxListingKeywords } from '../../../../shared/listing-discovery.js';
 import { publishAd, saveRequest } from './marketplace-api.js';
 import { UploadedPhoto } from './listing-photo.jsx';
 
@@ -12,39 +13,6 @@ const policies = [
   'Keep private contact details, ID documents, and payment information out of public titles, descriptions, and photos.',
   'Review any rental terms with the owner before making a commitment.',
 ];
-
-export function Dialog({ title, subtitle, className = '', headingMark, onClose, busy, children }) {
-  const dialog = useRef(null);
-  const heading = useRef(null);
-
-  useEffect(() => {
-    const node = dialog.current;
-    node.showModal();
-    return () => node.close();
-  }, []);
-
-  useEffect(() => {
-    dialog.current.scrollTop = 0;
-    heading.current.focus();
-  }, [title]);
-
-  return (
-    <dialog ref={dialog} className={`rental-dialog ${className}`.trim()} aria-labelledby="dialog-title" onCancel={(event) => {
-      event.preventDefault();
-      if (!busy) onClose();
-    }}>
-      <header className="dialog-header">
-        <div className="dialog-heading">
-          {headingMark}
-          <h2 id="dialog-title" ref={heading} tabIndex={-1}>{title}</h2>
-          {subtitle && <p>{subtitle}</p>}
-        </div>
-        <button className="close-button" type="button" aria-label="Close" onClick={onClose} disabled={busy}>×</button>
-      </header>
-      {children}
-    </dialog>
-  );
-}
 
 export function PostRental({ user, ownerUid, onClose, onPosted, onView }) {
   const [stage, setStage] = useState('form');

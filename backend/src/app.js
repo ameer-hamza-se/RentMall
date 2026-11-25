@@ -1,7 +1,7 @@
 import cors from 'cors';
 import express from 'express';
 import helmet from 'helmet';
-import { createAccountsRouter } from './accounts.js';
+import { createAccountsRouter } from './accounts/accounts-router.js';
 import { createListingsRouter } from './listings/listings-router.js';
 
 export function createApp({ allowedOrigins, getDatabaseStatus, useDatabase = false, fallbackListings = [], accounts }) {

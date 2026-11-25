@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { createUserWithEmailAndPassword, GoogleAuthProvider, getAdditionalUserInfo, sendPasswordResetEmail, signInWithEmailAndPassword, signInWithPopup, signOut } from 'firebase/auth';
 import { auth, requestProfile } from './account-api.js';
-import { validateDetails } from '../../shared/profile-details.js';
-import { Dialog } from './rental-dialogs.jsx';
+import { validateDetails } from '../../../../shared/profile-details.js';
+import { Dialog } from '../../components/dialog.jsx';
 
 const firebaseMessages = {
   'auth/email-already-in-use': 'This email already has an account. Sign in or reset your password.',

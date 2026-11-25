@@ -1,9 +1,9 @@
 import { applicationDefault, deleteApp, initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import mongoose from 'mongoose';
-import { accountProfiles, AccountProfile, validateProfile } from './accounts.js';
-import { Listing } from './listings/listing-model.js';
-import { configuredMongoUri } from './mongo-config.js';
+import { accountProfiles, AccountProfile, validateProfile } from '../src/accounts/accounts-router.js';
+import { Listing } from '../src/listings/listing-model.js';
+import { configuredMongoUri } from '../src/config/mongo-config.js';
 
 let app;
 let operation = 'checking configuration';

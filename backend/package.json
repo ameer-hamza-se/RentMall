@@ -8,8 +8,8 @@
     "start": "node --env-file-if-exists=.env src/server.js",
     "check": "node --check src/app.js && node --check src/server.js && node --check src/listings/listings-router.js && node --check src/listings/listing-model.js",
     "test": "node --test",
-    "db:check": "node --env-file-if-exists=.env src/check-database.js",
-    "db:migrate": "node --env-file-if-exists=.env src/migrate-firestore.js"
+    "db:check": "node --env-file-if-exists=.env scripts/check-database.js",
+    "db:migrate": "node --env-file-if-exists=.env scripts/migrate-firestore.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

@@ -3,8 +3,8 @@ import { applicationDefault, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { Listing, ensureAdNumber } from './listings/listing-model.js';
 import { createApp } from './app.js';
-import { accountProfiles, AccountProfile, RentalRequest } from './accounts.js';
-import { configuredMongoUri } from './mongo-config.js';
+import { accountProfiles, AccountProfile, RentalRequest } from './accounts/accounts-router.js';
+import { configuredMongoUri } from './config/mongo-config.js';
 
 const host = process.env.HOST || '127.0.0.1';
 const port = Number(process.env.PORT || 4000);

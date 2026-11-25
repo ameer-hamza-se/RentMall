@@ -1,4 +1,4 @@
-import { Marketplace } from './marketplace.jsx';
+import { Marketplace } from './features/marketplace/marketplace.jsx';
 
 export default function App() {
   if (window.location.pathname !== '/') {

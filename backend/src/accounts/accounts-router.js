@@ -1,5 +1,5 @@
-import { Listing, publishNumberedAd } from './listings/listing-model.js';
-import { validateDetails } from '../../shared/profile-details.js';
+import { Listing, publishNumberedAd } from '../listings/listing-model.js';
+import { validateDetails } from '../../../shared/profile-details.js';
 import express from 'express';
 import mongoose from 'mongoose';
 

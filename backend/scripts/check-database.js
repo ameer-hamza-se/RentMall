@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { configuredMongoUri } from './mongo-config.js';
+import { configuredMongoUri } from '../src/config/mongo-config.js';
 
 let uri;
 try {

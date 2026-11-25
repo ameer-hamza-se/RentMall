@@ -1,15 +1,15 @@
-import { validateDetails } from '../../shared/profile-details.js';
+import { validateDetails } from '../../../../shared/profile-details.js';
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { categories, cities, rateUnits } from '../../shared/catalog.js';
-import { listingSearchCriteria, listingSorts, matchesListingSearch, sortListings } from '../../shared/listing-discovery.js';
+import { categories, cities, rateUnits } from '../../../../shared/catalog.js';
+import { listingSearchCriteria, listingSorts, matchesListingSearch, sortListings } from '../../../../shared/listing-discovery.js';
 import { getOwnerAds, editAvailability, deleteAd } from './marketplace-api.js';
 import { ListingPhoto } from './listing-photo.jsx';
 import { PostRental, RentRequest } from './rental-dialogs.jsx';
-import { useApi } from './use-api.js';
+import { useApi } from '../../api/use-api.js';
 
 const money = new Intl.NumberFormat('en-PK', { style: 'currency', currency: 'PKR', maximumFractionDigits: 0 });
 const categoryLabels = Object.fromEntries(categories.map(({ id, label }) => [id, label]));
-const AccountDialog = lazy(() => import('./account.jsx'));
+const AccountDialog = lazy(() => import('../account/account-dialog.jsx'));
 
 function changeUrl(params, changes) {
   const next = new URLSearchParams(params);
@@ -335,9 +335,9 @@ function ProfilePage({ user, profile, onPhoto, onAvailability, onAdChange, ads, 
     setNotice('');
     setUploading(true);
     try {
-      const { resizeProfilePhoto } = await import('./profile-photo.js');
+      const { resizeProfilePhoto } = await import('../account/profile-photo.js');
       const photo = await resizeProfilePhoto(file);
-      const { saveProfilePhoto } = await import('./account-api.js');
+      const { saveProfilePhoto } = await import('../account/account-api.js');
       await saveProfilePhoto(user, photo);
       onPhoto(photo);
       setNotice('Profile photo updated.');
@@ -352,7 +352,7 @@ function ProfilePage({ user, profile, onPhoto, onAvailability, onAdChange, ads, 
     setSigningOut(true);
     setError('');
     try {
-      const { logoutAccount } = await import('./account-api.js');
+      const { logoutAccount } = await import('../account/account-api.js');
       await logoutAccount();
       navigate('/');
     } catch {
@@ -444,7 +444,7 @@ export function Marketplace() {
   useEffect(() => {
     let active = true;
     let unsubscribe;
-    import('./account-api.js').then(({ watchAccount, requestProfile }) => {
+    import('../account/account-api.js').then(({ watchAccount, requestProfile }) => {
       let generation = 0;
       if (active) unsubscribe = watchAccount(async (user) => {
         const current = ++generation;
@@ -515,7 +515,7 @@ export function Marketplace() {
       return;
     }
     try {
-      const { requestProfile } = await import('./account-api.js');
+      const { requestProfile } = await import('../account/account-api.js');
       const profile = await requestProfile(user, {
         method: favorites.includes(slug) ? 'DELETE' : 'PUT',
         path: '/favorites/' + encodeURIComponent(slug),
