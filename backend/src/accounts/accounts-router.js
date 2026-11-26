@@ -1,4 +1,5 @@
-import { Listing, publishedSahiwal, publishNumberedAd } from '../listings/listing-model.js';
+import { IndividualAdLimitError, Listing, publishedSahiwal, publishNumberedAd, requireIndividualAdSlot } from '../listings/listing-model.js';
+import { individualAdLimitMessage } from '../../../shared/catalog.js';
 import { pakistanMobileNumber, validateDetails } from '../../../shared/profile-details.js';
 import express from 'express';
 import mongoose from 'mongoose';
@@ -12,6 +13,7 @@ const profileSchema = new mongoose.Schema({
   phone: String,
   photo: { type: String, maxlength: 200000 },
   favorites: { type: [String], default: [] },
+  adRevision: { type: Number, select: false },
   accountType: { type: String, required: true, enum: ['individual', 'business'] },
   businessName: { type: String, maxlength: 120, default: '' },
   role: { type: String, default: 'member', enum: ['member', 'admin'] },
@@ -32,6 +34,15 @@ export const RentalRequest = mongoose.model('RentalRequest', rentalRequestSchema
 
 export const accountProfiles = {
   find: (firebaseUid) => AccountProfile.findOne({ firebaseUid }),
+  writeAds(firebaseUid, operation) {
+    return mongoose.connection.transaction(async (session) => {
+      // Serialize quota-changing writes for an owner before any listing reads.
+      const profile = await AccountProfile.updateOne(
+        { firebaseUid }, { $inc: { adRevision: 1 } }, { session, timestamps: false },
+      );
+      return profile.matchedCount ? operation(session) : null;
+    });
+  },
   async create(firebaseUid, fields) {
     try {
       return await AccountProfile.findOneAndUpdate(
@@ -93,6 +104,10 @@ function validAdFields({ title, summary, area, priceMinor, keywords, images }) {
     && Number.isSafeInteger(priceMinor) && priceMinor > 0 && priceMinor <= 999999900
     && (images === undefined || Array.isArray(images) && images.length <= 5 && images.every((image) => typeof image === 'string'))
     && (keywords === undefined || Array.isArray(keywords) && keywords.every((keyword) => typeof keyword === 'string'));
+}
+
+function adLimitResponse(response) {
+  return response.status(409).json({ code: 'INDIVIDUAL_AD_LIMIT', error: individualAdLimitMessage });
 }
 
 const rejectedTokenCodes = new Set([
@@ -158,19 +173,21 @@ export function createAccountsRouter({ verifyToken, profiles, isReady } = {}) {
   router.put('/me/ads/:slug', express.json({ limit: '5mb', inflate: false }), async (request, response) => {
     const { slug } = request.params;
     if (!/^(?:ad|demo)-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(slug)) return response.status(400).json({ error: 'Invalid ad ID.' });
-    if (!await profiles.find(request.identity.uid)) return response.status(403).json({ error: 'Complete your profile first.' });
+    const uid = request.identity.uid;
     const { title, category, area, priceMinor, rateUnit, summary, keywords, terms, images = [], ownerType } = request.body ?? {};
     if (!validAdFields({ title, summary, area, priceMinor, keywords, images })
       || typeof terms !== 'string' || terms.length > 400) {
       return response.status(400).json({ error: 'Check the ad details and images.' });
     }
-    const ad = new Listing({ slug, ownerUid: request.identity.uid, title, category, area: area || 'Sahiwal', priceMinor, rateUnit,
+    const ad = new Listing({ slug, ownerUid: uid, title, category, area: area || 'Sahiwal', priceMinor, rateUnit,
       summary, keywords, terms, images, imageCount: Array.isArray(images) ? images.length : 0, ownerType, city: 'sahiwal', status: 'published' });
     try {
       await ad.validate();
-      const saved = await publishNumberedAd(ad);
+      const saved = await publishNumberedAd(ad, (operation) => profiles.writeAds(uid, operation));
+      if (!saved) return response.status(403).json({ error: 'Complete your profile first.' });
       response.json({ adId: saved.adId });
     } catch (error) {
+      if (error instanceof IndividualAdLimitError) return adLimitResponse(response);
       if (error.name === 'ValidationError') return response.status(400).json({ error: 'Check the ad details and images.' });
       if (error.code === 11000) return response.status(409).json({ error: 'Ad ID already exists.' });
       throw error;
@@ -208,11 +225,20 @@ export function createAccountsRouter({ verifyToken, profiles, isReady } = {}) {
     }
 
     try {
-      const item = await Listing.findOneAndUpdate(key, update, { new: true, runValidators: true })
-        .select('-_id -__v').lean();
+      const item = await profiles.writeAds(key.ownerUid, async (session) => {
+        const previous = await Listing.findOne(key, 'category ownerType', { session }).lean();
+        if (!previous) return null;
+
+        if (ownerType === 'individual' && (previous.category !== category || previous.ownerType === 'business')) {
+          await requireIndividualAdSlot({ ownerUid: key.ownerUid, category }, session);
+        }
+        return Listing.findOneAndUpdate(key, update, { new: true, runValidators: true, session })
+          .select('-_id -__v').lean();
+      });
       if (!item) return response.status(404).json({ error: 'Ad not found.' });
       response.json({ item });
     } catch (error) {
+      if (error instanceof IndividualAdLimitError) return adLimitResponse(response);
       if (error.name === 'ValidationError') return response.status(400).json({ error: 'Check the ad details and images.' });
       throw error;
     }

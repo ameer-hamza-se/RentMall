@@ -5,6 +5,7 @@ import { createApp } from '../src/app.js';
 import { Listing } from '../src/listings/listing-model.js';
 
 const records = new Map();
+const pendingAdWrites = new Map();
 let server;
 let url;
 
@@ -19,6 +20,13 @@ before(async () => {
     },
     profiles: {
       find: (uid) => records.get(uid),
+      async writeAds(uid, operation) {
+        if (!records.has(uid)) return null;
+        const previous = pendingAdWrites.get(uid) ?? Promise.resolve();
+        const pending = previous.then(() => operation({ uid }));
+        pendingAdWrites.set(uid, pending.catch(() => {}));
+        return pending;
+      },
       create(uid, details) {
         if (!records.has(uid)) records.set(uid, { ...details, role: 'member' });
         return records.get(uid);
@@ -149,8 +157,9 @@ test('owners cannot save their own ads through the account API', async ({ mock }
 
 test('ad edits, availability and deletion are scoped to the owner and work with a six-digit legacy slug', async ({ mock }) => {
   const path = '/ads/117845';
-  let ad = { slug: '117845', ownerUid: 'first', adId: '117845', title: 'Original', available: false, imageCount: 1 };
+  let ad = { slug: '117845', ownerUid: 'first', adId: '117845', category: 'vehicles', ownerType: 'individual', title: 'Original', available: false, imageCount: 1 };
   const matches = ({ slug, ownerUid }) => ad?.slug === slug && ad.ownerUid === ownerUid;
+  mock.method(Listing, 'findOne', (key) => ({ lean: async () => matches(key) ? ad : null }));
   mock.method(Listing, 'findOneAndUpdate', (key, update, options) => ({
     select: () => ({
       lean: async () => {
@@ -234,4 +243,64 @@ test('contact details require a complete signed-in profile and a currently avail
   records.get('contact-owner').phone = '';
   const missingPhone = await request('first', 'GET', undefined, path);
   assert.equal((await missingPhone.json()).contact.phone, null);
+});
+
+test('limits individual ads by owner and category across publishing and editing', async ({ mock }) => {
+  const legacy = { slug: '734512', ownerUid: 'first', adId: '734512', category: 'vehicles', available: false };
+  const ads = new Map([[legacy.slug, legacy]]);
+  const matching = ({ slug, ownerUid }) => ads.get(slug)?.ownerUid === ownerUid ? ads.get(slug) : null;
+
+  mock.method(Listing, 'findOne', (key, _fields, { session }) => ({
+    lean: async () => {
+      assert.equal(session.uid, key.ownerUid);
+      return matching(key);
+    },
+  }));
+  mock.method(Listing, 'countDocuments', (filter) => ({
+    session: async ({ uid }) => {
+      assert.equal(uid, filter.ownerUid);
+      assert.deepEqual(filter.ownerType, { $ne: 'business' });
+      return [...ads.values()].filter((ad) =>
+        ad.ownerUid === uid && ad.category === filter.category && ad.ownerType !== 'business').length;
+    },
+  }));
+  mock.method(Listing, 'findOneAndUpdate', (key, changes, { session, upsert }) => {
+    assert.equal(session.uid, key.ownerUid);
+    if (upsert) {
+      ads.set(key.slug, changes.$setOnInsert);
+      return ads.get(key.slug);
+    }
+    return { select: () => ({ lean: async () => Object.assign(matching(key), changes.$set) }) };
+  });
+  mock.method(Listing, 'deleteOne', async (key) => ({ deletedCount: matching(key) && ads.delete(key.slug) ? 1 : 0 }));
+
+  const fields = { title: 'Test rental', summary: 'A rental for the category test.', category: 'vehicles', area: 'Sahiwal',
+    priceMinor: 50000, rateUnit: 'day', keywords: [], ownerType: 'individual' };
+  const path = (number) => '/ads/ad-00000000-0000-4000-8000-' + String(number).padStart(12, '0');
+  const publish = (number, overrides, owner = 'first') => request(owner, 'PUT', {
+    ...fields, terms: 'Confirm details with the owner.', ...overrides,
+  }, path(number));
+
+  const concurrent = await Promise.all([publish(1), publish(2)]);
+  assert.deepEqual(concurrent.map(({ status }) => status).sort(), [200, 409]);
+  const rejected = concurrent.find(({ status }) => status === 409);
+  assert.equal((await rejected.json()).code, 'INDIVIDUAL_AD_LIMIT');
+
+  const winner = concurrent.findIndex(({ status }) => status === 200) + 1;
+  const winnerId = (await concurrent[winner - 1].json()).adId;
+  const retry = await publish(winner);
+  assert.deepEqual(await retry.json(), { adId: winnerId });
+
+  assert.equal((await publish(3, { category: 'rooms' })).status, 200);
+  assert.equal((await publish(4, { ownerType: 'business' })).status, 200);
+  assert.equal((await request('first', 'PATCH', fields, path(3))).status, 409);
+  assert.equal((await request('first', 'PATCH', fields, path(4))).status, 409);
+  assert.equal((await request('first', 'PATCH', { ...fields, title: 'Updated in place' }, path(winner))).status, 200);
+
+  records.set('second', { name: 'Another Owner' });
+  assert.equal((await publish(5, {}, 'second')).status, 200);
+  assert.equal((await request('first', 'DELETE', undefined, '/ads/' + legacy.slug)).status, 204);
+  assert.equal((await request('first', 'PATCH', fields, path(4))).status, 200);
+  assert.equal((await publish(6)).status, 409);
+  records.delete('second');
 });

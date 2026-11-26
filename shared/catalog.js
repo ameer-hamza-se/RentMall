@@ -14,3 +14,7 @@ export const cities = [
 ];
 
 export const rateUnits = ['hour', 'day', 'month'];
+
+export const maxIndividualAdsPerCategory = 2;
+export const individualAdLimitMessage =
+  'You already have two individual ads in this category. Switch to business to continue.';

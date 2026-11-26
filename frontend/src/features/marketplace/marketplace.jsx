@@ -419,8 +419,12 @@ function Detail({ item, onRent, actions, backUrl, navigate }) {
           <button className="primary-button full-button" type="button" disabled={item.available === false} onClick={onRent}>Rent this</button>
           <h2>Description</h2>
           <p className="listing-description">{item.summary}</p>
-          <h2>Rental conditions</h2>
-          <p>{item.terms}</p>
+          <h2>Safety measures</h2>
+          <ul className="listing-safety">
+            <li>Meet only in busy public places, such as metro stations or malls.</li>
+            <li>Inspect the item carefully before renting it.</li>
+            <li>Never pay or transfer money in advance before inspecting the item.</li>
+          </ul>
         </article>
       </div>
     </main>
@@ -812,9 +816,9 @@ export function Marketplace() {
           />
         </Suspense>
       )}
-      {uid && modal?.name === 'post' && <PostRental user={user} ownerUid={uid} onClose={() => setModal(null)} onPosted={(ad) => { setLocalAds((existing) => [...(existing ?? []), ad]); }} onView={(ad) => { setModal(null); navigate(link({ city: null, listing: ad.slug, saved: null, from: profilePage ? 'profile' : null })); }} />}
+      {uid && modal?.name === 'post' && <PostRental user={user} ownerUid={uid} ownerAds={myAds} onClose={() => setModal(null)} onPosted={(ad) => { setLocalAds((existing) => [...(existing ?? []), ad]); }} onView={(ad) => { setModal(null); navigate(link({ city: null, listing: ad.slug, saved: null, from: profilePage ? 'profile' : null })); }} />}
       {uid && modal?.name === 'edit-ad' && ownedSlugs.has(modal.item.slug) && (
-        <PostRental key={modal.item.slug} user={user} listing={modal.item} onClose={() => setModal(null)} onUpdated={(item) => {
+        <PostRental key={modal.item.slug} user={user} listing={modal.item} ownerAds={myAds} onClose={() => setModal(null)} onUpdated={(item) => {
           setLocalAds((ads) => ads?.map((ad) => ad.slug === item.slug && ad.ownerUid === uid ? { ...item, available: ad.available } : ad));
           setModal(null);
           catalog.retry();

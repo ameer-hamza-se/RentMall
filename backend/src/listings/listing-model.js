@@ -1,6 +1,6 @@
 import { randomInt } from 'node:crypto';
 import mongoose from 'mongoose';
-import { categories, rateUnits } from '../../../shared/catalog.js';
+import { categories, maxIndividualAdsPerCategory, rateUnits } from '../../../shared/catalog.js';
 import { maxKeywordLength, maxListingKeywords } from '../../../shared/listing-discovery.js';
 
 export const publishedSahiwal = { status: 'published', city: 'sahiwal' };
@@ -49,12 +49,23 @@ async function allocateAdNumber(save) {
   throw new Error('Could not assign an ad ID.');
 }
 
-export function publishNumberedAd(ad) {
-  return allocateAdNumber((adId) => Listing.findOneAndUpdate(
-    { slug: ad.slug, ownerUid: ad.ownerUid },
-    { $setOnInsert: { ...ad.toObject(), adId } },
-    { upsert: true, new: true },
-  ));
+export class IndividualAdLimitError extends Error {}
+
+export async function requireIndividualAdSlot({ ownerUid, category }, session) {
+  const count = await Listing.countDocuments({ ownerUid, category, ownerType: { $ne: 'business' } }).session(session);
+  if (count >= maxIndividualAdsPerCategory) throw new IndividualAdLimitError();
+}
+
+export function publishNumberedAd(ad, writeAds) {
+  const key = { slug: ad.slug, ownerUid: ad.ownerUid };
+  return allocateAdNumber((adId) => writeAds(async (session) => {
+    const existing = await Listing.findOne(key, 'adId', { session }).lean();
+    if (existing) return existing;
+    if (ad.ownerType !== 'business') await requireIndividualAdSlot(ad, session);
+    return Listing.findOneAndUpdate(
+      key, { $setOnInsert: { ...ad.toObject(), adId } }, { upsert: true, new: true, session },
+    );
+  }));
 }
 
 export function ensureAdNumber(listing) {

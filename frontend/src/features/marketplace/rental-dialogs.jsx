@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { Dialog } from '../../components/dialog.jsx';
-import { categories, rateUnits } from '../../../../shared/catalog.js';
+import { categories, individualAdLimitMessage, maxIndividualAdsPerCategory, rateUnits } from '../../../../shared/catalog.js';
 import { maxKeywordLength, maxListingKeywords } from '../../../../shared/listing-discovery.js';
 import { editAd, publishAd } from './marketplace-api.js';
 import { ListingPhoto, UploadedPhoto } from './listing-photo.jsx';
@@ -14,12 +14,14 @@ const policies = [
   'Review any rental terms with the owner before making a commitment.',
 ];
 
-export function PostRental({ user, ownerUid, listing, onClose, onPosted, onUpdated, onView }) {
+export function PostRental({ user, ownerUid, listing, ownerAds, onClose, onPosted, onUpdated, onView }) {
   const [stage, setStage] = useState('form');
   const [draft, setDraft] = useState(() => listing ? {
     title: listing.title, description: listing.summary, category: listing.category, area: listing.area,
     price: listing.priceMinor / 100, rateUnit: listing.rateUnit, keywords: listing.keywords,
   } : {});
+  const [category, setCategory] = useState(listing?.category ?? '');
+  const [blockedCategory, setBlockedCategory] = useState('');
   const [photos, setPhotos] = useState([]);
   const [removeExisting, setRemoveExisting] = useState(false);
   const [business, setBusiness] = useState(listing?.ownerType === 'business');
@@ -30,6 +32,10 @@ export function PostRental({ user, ownerUid, listing, onClose, onPosted, onUpdat
   const title = listing ? 'Edit ad' : { form: 'Rent something out', policy: 'Rental ad policies', done: 'Ad placed' }[stage];
   const existingPhotoCount = listing?.photos?.length || listing?.imageCount || (listing?.photoUrl ? 1 : 0);
   const keepingPhotos = existingPhotoCount > 0 && !removeExisting && photos.length === 0;
+  const keepingIndividualSlot = listing?.category === category && listing.ownerType !== 'business';
+  const individualCount = ownerAds?.filter((ad) => ad.category === category && ad.ownerType !== 'business').length ?? 0;
+  const limitReached = !business && !!category && !keepingIndividualSlot
+    && (blockedCategory === category || individualCount >= maxIndividualAdsPerCategory);
 
   function addPhotos(event) {
     const files = Array.from(event.target.files);
@@ -48,6 +54,7 @@ export function PostRental({ user, ownerUid, listing, onClose, onPosted, onUpdat
 
   async function review(event) {
     event.preventDefault();
+    if (limitReached) return;
     const fields = Object.fromEntries(new FormData(event.currentTarget));
     fields.title = fields.title.trim();
     fields.description = fields.description.trim();
@@ -62,7 +69,7 @@ export function PostRental({ user, ownerUid, listing, onClose, onPosted, onUpdat
     }
     setError('');
     if (!listing) {
-      setDraft(fields);
+      setDraft({ ...fields, slug: 'ad-' + crypto.randomUUID() });
       setStage('policy');
       return;
     }
@@ -79,7 +86,8 @@ export function PostRental({ user, ownerUid, listing, onClose, onPosted, onUpdat
       }, files);
       onUpdated(updated);
     } catch (error) {
-      setError(error.message || 'Could not update your ad. Try again.');
+      if (error.code === 'INDIVIDUAL_AD_LIMIT') setBlockedCategory(fields.category);
+      else setError(error.message || 'Could not update your ad. Try again.');
     } finally {
       submission.current = false;
       setSaving(false);
@@ -92,7 +100,7 @@ export function PostRental({ user, ownerUid, listing, onClose, onPosted, onUpdat
     setSaving(true);
     setError('');
     const ad = {
-      slug: `ad-${crypto.randomUUID()}`,
+      slug: draft.slug,
       title: draft.title,
       summary: draft.description,
       keywords: draft.keywords,
@@ -113,8 +121,13 @@ export function PostRental({ user, ownerUid, listing, onClose, onPosted, onUpdat
       onPosted(saved);
       setPosted(saved);
       setStage('done');
-    } catch {
-      setError('Your ad could not be saved. Please try again.');
+    } catch (error) {
+      if (error.code === 'INDIVIDUAL_AD_LIMIT') {
+        setBlockedCategory(draft.category);
+        setStage('form');
+      } else {
+        setError(error.message || 'Your ad could not be saved. Please try again.');
+      }
     } finally {
       submission.current = false;
       setSaving(false);
@@ -128,7 +141,7 @@ export function PostRental({ user, ownerUid, listing, onClose, onPosted, onUpdat
           <label>Title<input name="title" required minLength={listing ? 1 : 3} maxLength={listing ? 100 : 90} defaultValue={draft.title} placeholder="e.g. Cordless drill with accessories" /></label>
           <label>Description<textarea name="description" required minLength={listing ? 1 : 10} maxLength={listing ? 2000 : 1500} rows={3} defaultValue={draft.description} placeholder="Describe what’s included and its condition" /></label>
           <div className="field-pair">
-            <label>Category<select name="category" defaultValue={draft.category ?? ''} required>
+            <label>Category<select name="category" value={category} onChange={(event) => setCategory(event.target.value)} required>
               <option value="" disabled>Select a category</option>
               {categories.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
             </select></label>
@@ -176,12 +189,18 @@ export function PostRental({ user, ownerUid, listing, onClose, onPosted, onUpdat
               ))}
             </ul>
           </fieldset>
-          <div className="owner-toggle">
-            <span>Posting as <strong>{business ? 'a business' : 'an individual'}</strong></span>
-            <button className="switch" type="button" role="switch" aria-label="Post as a business" aria-checked={business} onClick={() => setBusiness(!business)}><span /></button>
+          <div>
+            <div className="owner-toggle">
+              <span>Posting as <strong>{business ? 'a business' : 'an individual'}</strong></span>
+              <button className="switch" type="button" role="switch" aria-label="Post as a business" aria-checked={business}
+                aria-describedby="individual-ad-limit" onClick={() => setBusiness(!business)}><span /></button>
+            </div>
+            <p id="individual-ad-limit" className={limitReached ? 'ad-quota-note form-error' : 'ad-quota-note muted'} aria-live="polite">
+              {limitReached ? individualAdLimitMessage : 'You can post up to two individual ads per category.'}
+            </p>
           </div>
           {error && <p className="form-error" role="alert">{error}</p>}
-          <div className="form-footer"><button type="submit" className="primary-button full-button" disabled={saving}>{listing ? (saving ? 'Saving…' : 'Save changes') : 'Place ad'}</button></div>
+          <div className="form-footer"><button type="submit" className="primary-button full-button" disabled={saving || limitReached}>{listing ? (saving ? 'Saving…' : 'Save changes') : 'Place ad'}</button></div>
         </form>
       )}
       {stage === 'policy' && (

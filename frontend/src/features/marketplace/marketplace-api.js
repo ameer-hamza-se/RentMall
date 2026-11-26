@@ -10,7 +10,7 @@ async function accountData(user, path, method = 'GET', body, signal) {
   });
   if (!response.ok) {
     const result = await response.json().catch(() => null);
-    throw new Error(result?.error ?? 'Could not complete your request. Try again.');
+    throw Object.assign(new Error(result?.error ?? 'Could not complete your request. Try again.'), { code: result?.code });
   }
   return response.status === 204 ? null : response.json();
 }
