@@ -2,8 +2,8 @@ import { useRef, useState } from 'react';
 import { Dialog } from '../../components/dialog.jsx';
 import { categories, rateUnits } from '../../../../shared/catalog.js';
 import { maxKeywordLength, maxListingKeywords } from '../../../../shared/listing-discovery.js';
-import { publishAd, saveRequest } from './marketplace-api.js';
-import { UploadedPhoto } from './listing-photo.jsx';
+import { editAd, publishAd, saveRequest } from './marketplace-api.js';
+import { ListingPhoto, UploadedPhoto } from './listing-photo.jsx';
 
 const policies = [
   'List one item or place you own or have permission to rent. Choose the category that best fits it.',
@@ -14,16 +14,22 @@ const policies = [
   'Review any rental terms with the owner before making a commitment.',
 ];
 
-export function PostRental({ user, ownerUid, onClose, onPosted, onView }) {
+export function PostRental({ user, ownerUid, listing, onClose, onPosted, onUpdated, onView }) {
   const [stage, setStage] = useState('form');
-  const [draft, setDraft] = useState({});
+  const [draft, setDraft] = useState(() => listing ? {
+    title: listing.title, description: listing.summary, category: listing.category, area: listing.area,
+    price: listing.priceMinor / 100, rateUnit: listing.rateUnit, keywords: listing.keywords,
+  } : {});
   const [photos, setPhotos] = useState([]);
-  const [business, setBusiness] = useState(false);
+  const [removeExisting, setRemoveExisting] = useState(false);
+  const [business, setBusiness] = useState(listing?.ownerType === 'business');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [posted, setPosted] = useState(null);
   const submission = useRef(false);
-  const title = { form: 'Rent something out', policy: 'Rental ad policies', done: 'Ad placed' }[stage];
+  const title = listing ? 'Edit ad' : { form: 'Rent something out', policy: 'Rental ad policies', done: 'Ad placed' }[stage];
+  const existingPhotoCount = listing?.photos?.length || listing?.imageCount || (listing?.photoUrl ? 1 : 0);
+  const keepingPhotos = existingPhotoCount > 0 && !removeExisting && photos.length === 0;
 
   function addPhotos(event) {
     const files = Array.from(event.target.files);
@@ -40,23 +46,44 @@ export function PostRental({ user, ownerUid, onClose, onPosted, onView }) {
     setPhotos([...photos, ...files.map((file) => ({ id: crypto.randomUUID(), file }))]);
   }
 
-  function review(event) {
+  async function review(event) {
     event.preventDefault();
     const fields = Object.fromEntries(new FormData(event.currentTarget));
     fields.title = fields.title.trim();
     fields.description = fields.description.trim();
     fields.keywords = [...new Set(fields.keywords.toLowerCase().split(',').map((keyword) => keyword.trim()).filter(Boolean))];
-    if (fields.title.length < 3 || fields.description.length < 10) {
-      setError('Enter a title of at least three characters and a description of at least ten.');
+    if (listing ? !fields.title || !fields.description : fields.title.length < 3 || fields.description.length < 10) {
+      setError(listing ? 'Enter a title and description.' : 'Enter a title of at least three characters and a description of at least ten.');
       return;
     }
     if (fields.keywords.length > maxListingKeywords || fields.keywords.some((keyword) => keyword.length > maxKeywordLength)) {
       setError(`Use up to ${maxListingKeywords} keywords, with up to ${maxKeywordLength} characters each.`);
       return;
     }
-    setDraft(fields);
     setError('');
-    setStage('policy');
+    if (!listing) {
+      setDraft(fields);
+      setStage('policy');
+      return;
+    }
+
+    if (submission.current) return;
+    submission.current = true;
+    setSaving(true);
+    try {
+      const files = photos.length || removeExisting ? photos.map(({ file }) => file) : undefined;
+      const updated = await editAd(user, listing.slug, {
+        title: fields.title, summary: fields.description, category: fields.category, area: fields.area.trim(),
+        priceMinor: Math.round(Number(fields.price) * 100), rateUnit: fields.rateUnit, keywords: fields.keywords,
+        ownerType: business ? 'business' : 'individual',
+      }, files);
+      onUpdated(updated);
+    } catch (error) {
+      setError(error.message || 'Could not update your ad. Try again.');
+    } finally {
+      submission.current = false;
+      setSaving(false);
+    }
   }
 
   async function publish() {
@@ -95,20 +122,20 @@ export function PostRental({ user, ownerUid, onClose, onPosted, onView }) {
   }
 
   return (
-    <Dialog title={title} subtitle={stage === 'form' ? 'Create a rental listing in Sahiwal' : undefined} onClose={onClose} busy={saving}>
+    <Dialog title={title} subtitle={!listing && stage === 'form' ? 'Create a rental listing in Sahiwal' : undefined} onClose={onClose} busy={saving}>
       {stage === 'form' && (
         <form className="dialog-body ad-form" onSubmit={review}>
-          <label>Title<input name="title" required minLength={3} maxLength={90} defaultValue={draft.title} placeholder="e.g. Cordless drill with accessories" /></label>
-          <label>Description<textarea name="description" required minLength={10} maxLength={1500} rows={3} defaultValue={draft.description} placeholder="Describe what’s included and its condition" /></label>
+          <label>Title<input name="title" required minLength={listing ? 1 : 3} maxLength={listing ? 100 : 90} defaultValue={draft.title} placeholder="e.g. Cordless drill with accessories" /></label>
+          <label>Description<textarea name="description" required minLength={listing ? 1 : 10} maxLength={listing ? 2000 : 1500} rows={3} defaultValue={draft.description} placeholder="Describe what’s included and its condition" /></label>
           <div className="field-pair">
             <label>Category<select name="category" defaultValue={draft.category ?? ''} required>
               <option value="" disabled>Select a category</option>
               {categories.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
             </select></label>
-            <label>Area <span className="optional">(optional)</span><input name="area" maxLength={60} defaultValue={draft.area} placeholder="e.g. Farid Town" /></label>
+            <label>Area <span className="optional">(optional)</span><input name="area" maxLength={listing ? 80 : 60} defaultValue={draft.area} placeholder="e.g. Farid Town" /></label>
           </div>
           <div className="field-pair">
-            <label>Price (PKR)<input name="price" type="number" min="1" max="9999999" step="1" required defaultValue={draft.price} /></label>
+            <label>Price (PKR)<input name="price" type="number" min={listing ? '0.01' : '1'} max="9999999" step={listing ? '0.01' : '1'} required defaultValue={draft.price} /></label>
             <label>Rate unit<select name="rateUnit" defaultValue={draft.rateUnit ?? 'day'} required>
               {rateUnits.map((unit) => <option key={unit} value={unit}>Per {unit}</option>)}
             </select></label>
@@ -121,11 +148,21 @@ export function PostRental({ user, ownerUid, onClose, onPosted, onView }) {
             <small id="keyword-help" className="muted">Add up to {maxListingKeywords} words or phrases, separated by commas.</small>
           </div>
           <fieldset className="photo-field">
-            <legend>Photos <span className="photo-count">{photos.length}/5</span></legend>
+            <legend>Photos <span className="photo-count">{keepingPhotos ? existingPhotoCount : photos.length}/5</span></legend>
+            {keepingPhotos && (
+              <ul className="photo-previews">
+                {Array.from({ length: existingPhotoCount }, (_, index) => <li key={index}><ListingPhoto item={listing} index={index} /></li>)}
+              </ul>
+            )}
+            {existingPhotoCount > 0 && photos.length === 0 && (
+              <button className="signin-link edit-photos-action" type="button" onClick={() => setRemoveExisting(!removeExisting)}>
+                {removeExisting ? 'Keep existing photos' : 'Remove all photos'}
+              </button>
+            )}
             <label className="photo-picker" data-full={photos.length === 5}>
               <input id="post-photos" className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={addPhotos} disabled={photos.length === 5} />
               <span className="upload-icon" aria-hidden="true">+</span>
-              <span><strong>{photos.length === 5 ? 'Photo limit reached' : 'Add photos'}</strong><small>JPG, PNG, or WebP · Up to 10 MB each</small></span>
+              <span><strong>{photos.length === 5 ? 'Photo limit reached' : keepingPhotos ? 'Replace photos' : 'Add photos'}</strong><small>JPG, PNG, or WebP · Up to 10 MB each</small></span>
             </label>
             <ul className="photo-previews">
               {photos.map(({ id, file }, index) => (
@@ -144,7 +181,7 @@ export function PostRental({ user, ownerUid, onClose, onPosted, onView }) {
             <button className="switch" type="button" role="switch" aria-label="Post as a business" aria-checked={business} onClick={() => setBusiness(!business)}><span /></button>
           </div>
           {error && <p className="form-error" role="alert">{error}</p>}
-          <div className="form-footer"><button type="submit" className="primary-button full-button">Place ad</button></div>
+          <div className="form-footer"><button type="submit" className="primary-button full-button" disabled={saving}>{listing ? (saving ? 'Saving…' : 'Save changes') : 'Place ad'}</button></div>
         </form>
       )}
       {stage === 'policy' && (

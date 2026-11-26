@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { after, before, test } from 'node:test';
 import { createApp } from '../src/app.js';
+import { Listing } from '../src/listings/listing-model.js';
 
 const records = new Map();
 let server;
@@ -26,6 +27,15 @@ before(async () => {
         const record = records.get(uid);
         if (!record) return null;
         Object.assign(record, details);
+        return record;
+      },
+      favorite(uid, slug, saved) {
+        const record = records.get(uid);
+        if (!record) return null;
+        const favorites = new Set(record.favorites);
+        if (saved) favorites.add(slug);
+        else favorites.delete(slug);
+        record.favorites = [...favorites];
         return record;
       },
       importFavorites(uid, slugs) {
@@ -104,12 +114,17 @@ test('only an authenticated profile owner can update their photo', async () => {
   assert.deepEqual(await (await request('second')).json(), { profile: null });
 });
 
-test('saved listing imports merge repeatably into the authenticated profile', async () => {
+test('saved listing imports merge repeatably and skip the owner’s ads', async ({ mock }) => {
   const path = '/favorites/import';
+  mock.method(Listing, 'distinct', async (field, query) => {
+    assert.equal(field, 'slug');
+    assert.equal(query.ownerUid, 'first');
+    return query.slug.$in.includes('117845') ? ['117845'] : [];
+  });
   assert.equal((await request(null, 'POST', { slugs: ['123456'] }, path)).status, 401);
   assert.equal((await request('second', 'POST', { slugs: ['123456'] }, path)).status, 404);
   assert.equal((await request('first', 'POST', { slugs: [{ $ne: null }] }, path)).status, 400);
-  for (const slugs of [['123456'], ['123456', '654321']]) {
+  for (const slugs of [['123456', '117845'], ['123456', '654321']]) {
     assert.equal((await request('first', 'POST', { slugs }, path)).status, 200);
   }
   assert.deepEqual((await (await request('first')).json()).profile.favorites, ['123456', '654321']);
@@ -122,4 +137,63 @@ test('rental requests require sign-in, a completed profile and valid input', asy
   assert.equal((await request(null, 'PUT', payload, path)).status, 401);
   assert.equal((await request('second', 'PUT', payload, path)).status, 403);
   assert.equal((await request('first', 'PUT', { ...payload, quantity: 0 }, path)).status, 400);
+});
+
+test('owners cannot save their own ads through the account API', async ({ mock }) => {
+  mock.method(Listing, 'exists', async ({ slug, ownerUid }) => slug === '117845' && ownerUid === 'first');
+  assert.equal((await request('first', 'PUT', undefined, '/favorites/117845')).status, 409);
+  assert.equal((await request('first', 'PUT', undefined, '/favorites/100001')).status, 200);
+  assert.equal((await request('first', 'DELETE', undefined, '/favorites/100001')).status, 200);
+  assert.ok(!(await (await request('first')).json()).profile.favorites.includes('117845'));
+});
+
+test('ad edits, availability and deletion are scoped to the owner and work with a six-digit legacy slug', async ({ mock }) => {
+  const path = '/ads/117845';
+  let ad = { slug: '117845', ownerUid: 'first', adId: '117845', title: 'Original', available: false, imageCount: 1 };
+  const matches = ({ slug, ownerUid }) => ad?.slug === slug && ad.ownerUid === ownerUid;
+  mock.method(Listing, 'findOneAndUpdate', (key, update, options) => ({
+    select: () => ({
+      lean: async () => {
+        assert.equal(options.runValidators, true);
+        if (!matches(key)) return null;
+        ad = { ...ad, ...update.$set };
+        return ad;
+      },
+    }),
+  }));
+  mock.method(Listing, 'updateOne', async (key, update) => {
+    if (!matches(key)) return { matchedCount: 0 };
+    ad = { ...ad, ...update.$set };
+    return { matchedCount: 1 };
+  });
+  mock.method(Listing, 'deleteOne', async (key) => {
+    if (!matches(key)) return { deletedCount: 0 };
+    ad = null;
+    return { deletedCount: 1 };
+  });
+
+  const fields = { title: 'Updated title', summary: 'Updated details', category: 'vehicles', area: ' Farid Town ', priceMinor: 300000,
+    rateUnit: 'day', keywords: ['car'], ownerType: 'individual' };
+  assert.equal((await request(null, 'PATCH', fields, path)).status, 401);
+  assert.equal((await request('first', 'PATCH', { ...fields, adId: '999999' }, path)).status, 400);
+  assert.equal((await request('second', 'PATCH', fields, path)).status, 404);
+  assert.equal(ad.title, 'Original');
+  const result = await request('first', 'PATCH', fields, path);
+  assert.equal(result.status, 200);
+  const { item } = await result.json();
+  assert.equal(item.title, fields.title);
+  assert.equal(item.area, 'Farid Town');
+  assert.equal(item.imageCount, 1);
+  assert.equal(item.adId, '117845');
+  assert.equal(item.available, false);
+  assert.equal((await request('first', 'PATCH', { ...fields, images: [] }, path)).status, 200);
+  assert.equal(ad.imageCount, 0);
+  assert.equal((await request('second', 'PATCH', { available: true }, path)).status, 404);
+  assert.equal((await request('first', 'PATCH', { available: true }, path)).status, 204);
+  assert.equal(ad.available, true);
+  assert.equal((await request('second', 'DELETE', undefined, path)).status, 404);
+  assert.ok(ad);
+  assert.equal((await request('first', 'DELETE', undefined, path)).status, 204);
+  assert.equal(ad, null);
+  assert.equal((await request('first', 'PATCH', fields, path)).status, 404);
 });

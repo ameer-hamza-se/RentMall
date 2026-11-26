@@ -4,7 +4,7 @@ import { rateUnits } from '../../../shared/catalog.js';
 import { listingSearchCriteria, listingSorts, matchesListingSearch, relatedSearchFields, searchableFields, sortListings } from '../../../shared/listing-discovery.js';
 
 const publicListing = { status: 'published', city: 'sahiwal', ownerUid: { $type: 'string', $ne: '' } };
-const publicFields = 'slug adId title category city area priceMinor rateUnit summary keywords terms photoUrl imageCount available ownerType createdAt -_id';
+const publicFields = 'slug adId title category city area priceMinor rateUnit summary keywords terms photoUrl imageCount available ownerType createdAt updatedAt -_id';
 
 function readFilters(query) {
   const { q = '', city = '', category = '', rateUnit = '', sort = '', maxPrice = '', page = '1', limit = '12' } = query;

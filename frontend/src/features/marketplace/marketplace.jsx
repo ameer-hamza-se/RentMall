@@ -3,6 +3,7 @@ import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 're
 import { categories, cities, rateUnits } from '../../../../shared/catalog.js';
 import { listingSearchCriteria, listingSorts, matchesListingSearch, sortListings } from '../../../../shared/listing-discovery.js';
 import { getOwnerAds, editAvailability, deleteAd } from './marketplace-api.js';
+import { Dialog } from '../../components/dialog.jsx';
 import { ListingPhoto } from './listing-photo.jsx';
 import { PostRental, RentRequest } from './rental-dialogs.jsx';
 import { useApi } from '../../api/use-api.js';
@@ -37,6 +38,9 @@ function MarketIcon({ name, filled = false }) {
     plus: 'M12 5v14M5 12h14',
     search: 'm21 21-4.3-4.3M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z',
     edit: 'm4 16 12-12a2 2 0 0 1 3 3L7 19l-4 1 1-4Zm10-10 3 3',
+    chevron: 'm6 9 6 6 6-6',
+    trash: 'M4 7h16m-11 0V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5',
+    refresh: 'M20 5v5h-5m5 0a8 8 0 0 0-14-4m-2 13v-5h5m-5 0a8 8 0 0 0 14 4',
     moon: 'M20.9 13.3A8.9 8.9 0 0 1 10.7 3.1 9 9 0 1 0 20.9 13.3Z',
     info: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM12 11v5m0-8v.1',
     user: 'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2m12-13a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z',
@@ -105,9 +109,12 @@ function ProfileMenu({ user, photo, onProfile, navigate, aboutPage, profilePage 
     }}>
       <button ref={trigger} type="button" className="profile-button" aria-label="Profile menu"
         aria-expanded={open} aria-controls="profile-options" onClick={() => setOpen(!open)}>
-        {photo ? <img className="profile-photo" src={photo} alt="" /> : user
-          ? <span aria-hidden="true">{(user.displayName?.trim() || user.email || 'R').charAt(0).toUpperCase()}</span>
-          : <MarketIcon name="user" />}
+        <span className="profile-avatar" aria-hidden="true">
+          {photo ? <img className="profile-photo" src={photo} alt="" /> : user
+            ? (user.displayName?.trim() || user.email || 'R').charAt(0).toUpperCase()
+            : <MarketIcon name="user" />}
+        </span>
+        <span className="profile-chevron"><MarketIcon name="chevron" /></span>
       </button>
       <div id="profile-options" className="profile-menu-panel" hidden={!open}>
         <button type="button" className="profile-menu-item" aria-current={profilePage ? 'page' : undefined} onClick={() => {
@@ -199,57 +206,102 @@ function CategoryNav({ category, link, navigate }) {
   );
 }
 
-function Availability({ available }) {
-  return (
-    <span className="availability" data-unavailable={available === false}>
-      {available === false ? 'Unavailable' : 'Available now'}
-    </span>
-  );
-}
-
-function AvailabilityControl({ item, onChange }) {
+function Availability({ item, onChange }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const available = item.available === false;
+  const unavailable = item.available === false;
+  const action = unavailable ? 'Mark available' : 'Mark unavailable';
+
   async function change() {
     setSaving(true);
     setError('');
     try {
-      await onChange(item, available);
+      await onChange(item, unavailable);
     } catch {
       setError('Could not update availability. Try again.');
     } finally {
       setSaving(false);
     }
   }
+
   return (
-    <div className="ad-availability-control">
-      <button className="secondary-button" type="button" onClick={change} disabled={saving}>
-        {saving ? 'Updating…' : available ? 'Mark available' : 'Mark unavailable'}
-      </button>
-      {error && <p className="account-error" role="alert">{error}</p>}
+    <div className="availability-row">
+      <span className="availability" data-unavailable={unavailable} aria-live={onChange ? 'polite' : undefined}>
+        {unavailable ? 'Unavailable' : 'Available now'}
+      </span>
+      {onChange && (
+        <button type="button" className="ad-icon availability-toggle" aria-label={action} title={action} data-saving={saving} disabled={saving} onClick={change}>
+          <MarketIcon name="refresh" />
+        </button>
+      )}
+      {error && <p className="account-error availability-error" role="alert">{error}</p>}
     </div>
   );
 }
 
-function ListingCard({ item, href, navigate, favorite, onFavorite }) {
+function OwnerAdActions({ item, actions }) {
+  return (
+    <div className="owner-ad-actions" role="group" aria-label={'Manage ' + item.title}>
+      <button type="button" className="ad-icon delete-ad" aria-label={'Delete ad: ' + item.title} title="Delete ad" onClick={() => actions.remove(item)}>
+        <MarketIcon name="trash" />
+      </button>
+      <button type="button" className="ad-icon edit-ad" aria-label={'Edit ad: ' + item.title} title="Edit ad" onClick={() => actions.edit(item)}>
+        <MarketIcon name="edit" />
+      </button>
+    </div>
+  );
+}
+
+function DeleteAdDialog({ item, user, onClose, onDeleted }) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  async function confirm() {
+    setSaving(true);
+    setError('');
+    try {
+      await deleteAd(user, item.slug);
+      onDeleted(item);
+    } catch {
+      setError('Could not delete your ad. Try again.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog title="Delete ad?" onClose={onClose} busy={saving}>
+      <div className="dialog-body">
+        <p>“{item.title}” will be permanently removed from RentMall.</p>
+        {error && <p className="account-error" role="alert">{error}</p>}
+        <div className="dialog-actions">
+          <button type="button" className="secondary-button" disabled={saving} onClick={onClose}>Cancel</button>
+          <button type="button" className="primary-button delete-confirm" disabled={saving} onClick={confirm}>{saving ? 'Deleting…' : 'Delete ad'}</button>
+        </div>
+      </div>
+    </Dialog>
+  );
+}
+
+function ListingCard({ item, href, navigate, favorite, onFavorite, actions }) {
   return (
     <article className="listing-card">
-      <NavLink className="card-link" href={href} navigate={navigate}>
-        <ListingPhoto item={item} />
-        <div className="card-info">
-          <Availability available={item.available} />
-          <p className="price"><strong>{money.format(item.priceMinor / 100)}</strong><span> / {item.rateUnit}</span></p>
-          <h3>{item.title}</h3>
-          <p className="card-location">
-            <span className="city-pin card-pin" aria-hidden="true"><MarketIcon name="pin" /></span>
-            <span>{[item.area, 'Sahiwal'].filter(Boolean).join(', ')}</span>
-          </p>
-        </div>
-      </NavLink>
-      <button type="button" className="favorite" aria-label={`${favorite ? 'Remove from' : 'Add to'} saved rentals: ${item.title}`} aria-pressed={favorite} onClick={() => onFavorite(item.slug)}>
-        <MarketIcon name="heart" filled={favorite} />
-      </button>
+      <ListingPhoto item={item} />
+      <div className="card-info">
+        <Availability item={item} onChange={actions?.availability} />
+        <p className="price"><strong>{money.format(item.priceMinor / 100)}</strong><span> / {item.rateUnit}</span></p>
+        <h3><NavLink className="card-link" href={href} navigate={navigate}>{item.title}</NavLink></h3>
+        <p className="card-location">
+          <span className="city-pin card-pin" aria-hidden="true"><MarketIcon name="pin" /></span>
+          <span>{[item.area, 'Sahiwal'].filter(Boolean).join(', ')}</span>
+        </p>
+      </div>
+      {actions && <OwnerAdActions item={item} actions={actions} />}
+      {onFavorite && (
+        <button type="button" className="favorite" aria-label={(favorite ? 'Remove from' : 'Add to') + ' saved rentals: ' + item.title} aria-pressed={favorite} onClick={() => onFavorite(item.slug)}>
+          <MarketIcon name="heart" filled={favorite} />
+        </button>
+      )}
     </article>
   );
 }
@@ -354,18 +406,19 @@ function Filters({ units, maxPrice, sort, onApply }) {
   );
 }
 
-function Detail({ item, onRent, onAvailability, backUrl, navigate }) {
+function Detail({ item, onRent, actions, backUrl, navigate }) {
   const [photo, setPhoto] = useState(0);
   const photoCount = item.photos?.length ?? item.imageCount ?? 0;
+  const photoIndex = Math.min(photo, Math.max(0, photoCount - 1));
   return (
     <main className="site-width detail-page" id="main-content">
       <NavLink className="back-link" href={backUrl} navigate={navigate}>Back to rentals</NavLink>
       <div className="detail-layout">
         <div>
-          <div className="detail-image"><ListingPhoto item={item} index={photo} loading="eager" /></div>
+          <div className="detail-image"><ListingPhoto item={item} index={photoIndex} loading="eager" /></div>
           {photoCount > 1 && <div className="gallery-controls" aria-label="Listing photos">
             {Array.from({ length: photoCount }, (_, index) => (
-              <button key={index} type="button" className="secondary-button" aria-pressed={photo === index} onClick={() => setPhoto(index)}>Photo {index + 1}</button>
+              <button key={index} type="button" className="secondary-button" aria-pressed={photoIndex === index} onClick={() => setPhoto(index)}>Photo {index + 1}</button>
             ))}
           </div>}
         </div>
@@ -375,11 +428,13 @@ function Detail({ item, onRent, onAvailability, backUrl, navigate }) {
             {item.adId && <small className="ad-id">Ad ID {item.adId}</small>}
           </div>
           <h1>{item.title}</h1>
-          <Availability available={item.available} />
+          <div className="detail-listing-actions">
+            <Availability item={item} onChange={actions?.availability} />
+            {actions && <OwnerAdActions item={item} actions={actions} />}
+          </div>
           <p className="muted">{[item.area, 'Sahiwal'].filter(Boolean).join(', ')} · {item.ownerType === 'business' ? 'Business' : 'Individual'}</p>
           <p className="price"><strong>{money.format(item.priceMinor / 100)}</strong><span> / {item.rateUnit}</span></p>
           <button className="primary-button full-button" type="button" disabled={item.available === false} onClick={onRent}>Rent this</button>
-          {onAvailability && <AvailabilityControl item={item} onChange={onAvailability} />}
           <h2>Description</h2>
           <p className="listing-description">{item.summary}</p>
           <h2>Rental conditions</h2>
@@ -408,7 +463,7 @@ function ProfileSkeleton() {
   );
 }
 
-function ProfilePage({ user, profile, onPhoto, onAvailability, onAdChange, ads, favorites, navigate, onFavorite, onEdit, onPost }) {
+function ProfilePage({ user, profile, onPhoto, ads, adActions, navigate, onEdit, onPost }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -509,17 +564,7 @@ function ProfilePage({ user, profile, onPhoto, onAvailability, onAdChange, ads, 
           ) : ads.length ? (
             <div className="listing-grid">
               {ads.map((item) => (
-                <div key={item.slug}>
-                  <ListingCard item={item} href={changeUrl([], { listing: item.slug, from: 'profile' })} navigate={navigate} favorite={favorites.includes(item.slug)} onFavorite={onFavorite} />
-                  <AvailabilityControl item={item} onChange={onAvailability} />
-                  <div className="profile-ads-heading">
-                    <button type="button" className="signin-link" onClick={async () => {
-                      if (!window.confirm('Delete this ad?')) return;
-                      try { await deleteAd(user, item.slug); onAdChange(item.slug, null); }
-                      catch { setError('Could not delete ad.'); }
-                    }}>Delete ad</button>
-                  </div>
-                </div>
+                <ListingCard key={item.slug} item={item} href={changeUrl([], { listing: item.slug, from: 'profile' })} navigate={navigate} actions={adActions} />
               ))}
             </div>
           ) : <div className="state-box"><h3>You haven’t posted any ads yet.</h3></div>}
@@ -570,7 +615,7 @@ export function Marketplace() {
   async function changeAvailability(item, available) {
     await editAvailability(user, item.slug, available);
     catalog.retry();
-    setLocalAds((ads) => (ads ?? []).map((ad) => ad.slug === item.slug ? { ...ad, available } : ad));
+    setLocalAds((ads) => ads?.map((ad) => ad.slug === item.slug && ad.ownerUid === uid ? { ...ad, available } : ad));
   }
 
   useEffect(() => {
@@ -606,6 +651,7 @@ export function Marketplace() {
   }
 
   async function toggleFavorite(slug) {
+    if (ownedSlugs.has(slug)) return;
     if (!uid) {
       setModal({ name: 'account', continuation: { name: 'favorite', slug, label: 'Save this rental' } });
       return;
@@ -646,13 +692,19 @@ export function Marketplace() {
   const ownedSlugs = new Set(ownedLocal.map((ad) => ad.slug));
   const all = [...(catalog.body?.items ?? []).filter((ad) => !ownedSlugs.has(ad.slug)), ...ownedLocal];
   const selected = slug && all.find((item) => item.slug === slug);
+  const detailBackUrl = params.get('from') === 'profile' ? '/?profile=1' : link({ listing: null });
+  const adActions = {
+    availability: changeAvailability,
+    edit: (item) => setModal({ name: 'edit-ad', item }),
+    remove: (item) => setModal({ name: 'delete-ad', item }),
+  };
   const loading = catalog.status === 'loading' || localAds === null;
   const filtered = sortListings(all.filter((item) => (
     (!category || item.category === category.id)
     && matchesListingSearch(item, search)
     && (!unit || item.rateUnit === unit)
     && (!maxPrice || item.priceMinor <= Number(maxPrice) * 100)
-    && (!saved || favorites.includes(item.slug))
+    && (!saved || !ownedSlugs.has(item.slug) && favorites.includes(item.slug))
   )), sort);
   const home = !category && !query && !unit && !sort && !saved;
   const groups = home ? categories.map(({ id, label }) => ({ id, title: label, items: filtered.filter((item) => item.category === id) })) : [
@@ -669,12 +721,9 @@ export function Marketplace() {
       {!profilePage && !aboutPage && <CategoryNav category={category?.id} link={link} navigate={navigate} />}
       {aboutPage ? <AboutPage navigate={navigate} /> : profilePage ? (
         uid && session.profile ? (
-          <ProfilePage onAvailability={changeAvailability} onAdChange={(slug, changes) => {
-            setLocalAds((ads) => changes ? ads.map((ad) => ad.slug === slug ? { ...ad, ...changes } : ad) : ads.filter((ad) => ad.slug !== slug));
-            catalog.retry();
-          }} key={uid} user={user} profile={session.profile} onPhoto={(photo) => {
+          <ProfilePage key={uid} user={user} profile={session.profile} onPhoto={(photo) => {
             setSession((previous) => previous.user?.uid === uid ? { ...previous, profile: { ...previous.profile, photo } } : previous);
-          }} ads={myAds} favorites={favorites} navigate={navigate} onFavorite={toggleFavorite} onEdit={() => setModal({ name: 'account', editing: true })} onPost={showPosts} />
+          }} ads={myAds} adActions={adActions} navigate={navigate} onEdit={() => setModal({ name: 'account', editing: true })} onPost={showPosts} />
         ) : (
           !ready ? <ProfileSkeleton /> : <main className="site-width unavailable" id="main-content">
             <h1>My profile</h1>
@@ -705,7 +754,7 @@ export function Marketplace() {
           <NavLink className="back-link" href={link({ listing: null, saved: null })} navigate={navigate}>Back to rentals</NavLink>
         </main>
       ) : slug ? (
-        selected ? <Detail key={slug} item={selected} onAvailability={myAds?.some((ad) => ad.slug === selected.slug) ? changeAvailability : undefined} onRent={() => setModal({ name: 'rent' })} backUrl={params.get('from') === 'profile' ? '/?profile=1' : link({ listing: null })} navigate={navigate} /> : loading ? (
+        selected ? <Detail key={slug} item={selected} actions={ownedSlugs.has(selected.slug) ? adActions : undefined} onRent={() => setModal({ name: 'rent' })} backUrl={detailBackUrl} navigate={navigate} /> : loading ? (
           <DetailSkeleton backUrl={link({ listing: null })} navigate={navigate} />
         ) : (
           <main className="site-width unavailable" id="main-content">
@@ -740,7 +789,7 @@ export function Marketplace() {
                 </div>}
                 <div className="listing-grid">
                   {(home ? group.items.slice(0, 4) : group.items).map((item) => (
-                    <ListingCard key={item.slug} item={item} href={link({ listing: item.slug })} navigate={navigateToAccountPage} favorite={favorites.includes(item.slug)} onFavorite={toggleFavorite} />
+                    <ListingCard key={item.slug} item={item} href={link({ listing: item.slug })} navigate={navigateToAccountPage} favorite={favorites.includes(item.slug)} onFavorite={ownedSlugs.has(item.slug) ? undefined : toggleFavorite} />
                   ))}
                 </div>
               </section>
@@ -782,6 +831,21 @@ export function Marketplace() {
         </Suspense>
       )}
       {uid && modal?.name === 'post' && <PostRental user={user} ownerUid={uid} onClose={() => setModal(null)} onPosted={(ad) => { setLocalAds((existing) => [...(existing ?? []), ad]); }} onView={(ad) => { setModal(null); navigate(link({ city: null, listing: ad.slug, saved: null, from: profilePage ? 'profile' : null })); }} />}
+      {uid && modal?.name === 'edit-ad' && ownedSlugs.has(modal.item.slug) && (
+        <PostRental key={modal.item.slug} user={user} listing={modal.item} onClose={() => setModal(null)} onUpdated={(item) => {
+          setLocalAds((ads) => ads?.map((ad) => ad.slug === item.slug && ad.ownerUid === uid ? { ...item, available: ad.available } : ad));
+          setModal(null);
+          catalog.retry();
+        }} />
+      )}
+      {uid && modal?.name === 'delete-ad' && ownedSlugs.has(modal.item.slug) && (
+        <DeleteAdDialog item={modal.item} user={user} onClose={() => setModal(null)} onDeleted={(item) => {
+          setLocalAds((ads) => ads?.filter((ad) => ad.slug !== item.slug || ad.ownerUid !== uid));
+          setModal(null);
+          if (slug === item.slug) navigate(detailBackUrl);
+          catalog.retry();
+        }} />
+      )}
       {uid && modal?.name === 'rent' && selected && selected.available !== false && <RentRequest item={selected} user={user} onClose={() => setModal(null)} />}
     </>
   );

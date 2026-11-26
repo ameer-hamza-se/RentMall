@@ -36,12 +36,23 @@ async function encodePhoto(file) {
   }
 }
 
-export async function publishAd(user, ad) {
+async function encodePhotos(files) {
   const images = [];
-  for (const file of ad.photos) images.push(await encodePhoto(file));
+  for (const file of files) images.push(await encodePhoto(file));
+  return images;
+}
+
+export async function publishAd(user, ad) {
   const { photos, ...fields } = ad;
-  const { adId } = await accountData(user, '/ads/' + encodeURIComponent(ad.slug), 'PUT', { ...fields, imageCount: photos.length, images });
+  const images = await encodePhotos(photos);
+  const { adId } = await accountData(user, '/ads/' + encodeURIComponent(ad.slug), 'PUT', { ...fields, imageCount: images.length, images });
   return { ...ad, adId, available: true };
+}
+
+export async function editAd(user, slug, fields, photos) {
+  const body = photos === undefined ? fields : { ...fields, images: await encodePhotos(photos) };
+  const { item } = await accountData(user, '/ads/' + encodeURIComponent(slug), 'PATCH', body);
+  return item;
 }
 
 export function editAvailability(user, slug, available) {

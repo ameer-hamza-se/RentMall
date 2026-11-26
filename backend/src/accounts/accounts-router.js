@@ -86,6 +86,15 @@ function validPhoto(photo) {
   return typeof photo === 'string' && photo.length <= 200000 && /^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(photo);
 }
 
+function validAdFields({ title, summary, area, priceMinor, keywords, images }) {
+  const textFields = [[title, 100], [summary, 2000], [area ?? '', 80]];
+  return textFields.every(([value, limit]) => typeof value === 'string' && value.length <= limit)
+    && !!title.trim() && !!summary.trim()
+    && Number.isSafeInteger(priceMinor) && priceMinor > 0 && priceMinor <= 999999900
+    && (images === undefined || Array.isArray(images) && images.length <= 5 && images.every((image) => typeof image === 'string'))
+    && (keywords === undefined || Array.isArray(keywords) && keywords.every((keyword) => typeof keyword === 'string'));
+}
+
 const rejectedTokenCodes = new Set([
   'auth/argument-error', 'auth/invalid-argument', 'auth/invalid-id-token',
   'auth/id-token-expired', 'auth/id-token-revoked', 'auth/user-disabled', 'auth/user-not-found',
@@ -122,11 +131,8 @@ export function createAccountsRouter({ verifyToken, profiles, isReady } = {}) {
     if (!/^(?:ad|demo)-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(slug)) return response.status(400).json({ error: 'Invalid ad ID.' });
     if (!await profiles.find(request.identity.uid)) return response.status(403).json({ error: 'Complete your profile first.' });
     const { title, category, area, priceMinor, rateUnit, summary, keywords, terms, images = [], ownerType } = request.body ?? {};
-    const textFields = [[title, 100], [summary, 2000], [area ?? '', 80], [terms, 400]];
-    if (textFields.some(([value, limit]) => typeof value !== 'string' || value.length > limit)
-      || !Number.isSafeInteger(priceMinor) || priceMinor <= 0 || priceMinor > 999999900
-      || !Array.isArray(images) || images.length > 5 || images.some((image) => typeof image !== 'string')
-      || (keywords !== undefined && (!Array.isArray(keywords) || keywords.some((keyword) => typeof keyword !== 'string')))) {
+    if (!validAdFields({ title, summary, area, priceMinor, keywords, images })
+      || typeof terms !== 'string' || terms.length > 400) {
       return response.status(400).json({ error: 'Check the ad details and images.' });
     }
     const ad = new Listing({ slug, ownerUid: request.identity.uid, title, category, area: area || 'Sahiwal', priceMinor, rateUnit,
@@ -142,15 +148,50 @@ export function createAccountsRouter({ verifyToken, profiles, isReady } = {}) {
     }
   });
 
-  router.patch('/me/ads/:slug', express.json({ limit: '2kb', inflate: false }), async (request, response) => {
-    if (typeof request.body?.available !== 'boolean') return response.status(400).json({ error: 'Choose an availability status.' });
-    const result = await Listing.updateOne({ slug: request.params.slug, ownerUid: request.identity.uid }, { $set: { available: request.body.available } });
-    response.sendStatus(result.matchedCount ? 204 : 404);
+  router.patch('/me/ads/:slug', express.json({ limit: '5mb', inflate: false }), async (request, response) => {
+    const key = { slug: request.params.slug, ownerUid: request.identity.uid };
+    const body = request.body;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return response.status(400).json({ error: 'Check the ad details.' });
+    }
+
+    if (Object.hasOwn(body, 'available')) {
+      if (Object.keys(body).length !== 1 || typeof body.available !== 'boolean') {
+        return response.status(400).json({ error: 'Choose an availability status.' });
+      }
+      const result = await Listing.updateOne(key, { $set: { available: body.available } });
+      return response.sendStatus(result.matchedCount ? 204 : 404);
+    }
+
+    const { title, summary, area, category, priceMinor, rateUnit, keywords, ownerType, images } = body;
+    const permitted = ['title', 'summary', 'area', 'category', 'priceMinor', 'rateUnit', 'keywords', 'ownerType', 'images'];
+    if (Object.keys(body).some((field) => !permitted.includes(field))
+      || !validAdFields({ title, summary, area, priceMinor, keywords, images })
+      || typeof category !== 'string' || typeof rateUnit !== 'string' || !['individual', 'business'].includes(ownerType)) {
+      return response.status(400).json({ error: 'Check the ad details and images.' });
+    }
+
+    const fields = { title: title.trim(), summary: summary.trim(), area: area?.trim() || 'Sahiwal', category, priceMinor, rateUnit, keywords: keywords ?? [], ownerType };
+    const update = { $set: fields };
+    if (images !== undefined) {
+      Object.assign(fields, { images, imageCount: images.length });
+      update.$unset = { photoUrl: 1 };
+    }
+
+    try {
+      const item = await Listing.findOneAndUpdate(key, update, { new: true, runValidators: true })
+        .select('-_id -__v').lean();
+      if (!item) return response.status(404).json({ error: 'Ad not found.' });
+      response.json({ item });
+    } catch (error) {
+      if (error.name === 'ValidationError') return response.status(400).json({ error: 'Check the ad details and images.' });
+      throw error;
+    }
   });
 
   router.delete('/me/ads/:slug', async (request, response) => {
-    await Listing.deleteOne({ slug: request.params.slug, ownerUid: request.identity.uid });
-    response.sendStatus(204);
+    const result = await Listing.deleteOne({ slug: request.params.slug, ownerUid: request.identity.uid });
+    response.sendStatus(result.deletedCount ? 204 : 404);
   });
 
   router.put('/me/requests/:id', express.json({ limit: '2kb', inflate: false }), async (request, response) => {
@@ -206,7 +247,12 @@ export function createAccountsRouter({ verifyToken, profiles, isReady } = {}) {
   async function setFavorite(request, response) {
     const { slug } = request.params;
     if (!/^[a-z0-9-]{1,180}$/.test(slug)) return response.status(400).json({ error: 'Invalid ad ID.' });
-    const profile = await profiles.favorite(request.identity.uid, slug, request.method === 'PUT');
+    const uid = request.identity.uid;
+    const saved = request.method === 'PUT';
+    if (saved && await Listing.exists({ slug, ownerUid: uid })) {
+      return response.status(409).json({ error: 'You can’t save your own ad.' });
+    }
+    const profile = await profiles.favorite(uid, slug, saved);
     if (!profile) return response.status(404).json({ error: 'Complete your profile first.' });
     response.json({ profile: profileView(profile, request.identity) });
   }
@@ -216,7 +262,10 @@ export function createAccountsRouter({ verifyToken, profiles, isReady } = {}) {
       || slugs.some((slug) => typeof slug !== 'string' || !/^[a-z0-9-]{1,180}$/.test(slug))) {
       return response.status(400).json({ error: 'Check the saved listings.' });
     }
-    const profile = await profiles.importFavorites(request.identity.uid, slugs);
+    const uid = request.identity.uid;
+    if (!await profiles.find(uid)) return response.status(404).json({ error: 'Complete your profile first.' });
+    const owned = new Set(await Listing.distinct('slug', { slug: { $in: slugs }, ownerUid: uid }));
+    const profile = await profiles.importFavorites(uid, slugs.filter((slug) => !owned.has(slug)));
     if (!profile) return response.status(404).json({ error: 'Complete your profile first.' });
     response.json({ profile: profileView(profile, request.identity) });
   });
