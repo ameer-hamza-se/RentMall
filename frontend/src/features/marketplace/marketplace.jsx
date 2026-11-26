@@ -1,5 +1,5 @@
 import { validateDetails } from '../../../../shared/profile-details.js';
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { categories, cities, rateUnits } from '../../../../shared/catalog.js';
 import { listingSearchCriteria, listingSorts, matchesListingSearch, sortListings } from '../../../../shared/listing-discovery.js';
 import { getOwnerAds, editAvailability, deleteAd } from './marketplace-api.js';
@@ -37,6 +37,8 @@ function MarketIcon({ name, filled = false }) {
     plus: 'M12 5v14M5 12h14',
     search: 'm21 21-4.3-4.3M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z',
     edit: 'm4 16 12-12a2 2 0 0 1 3 3L7 19l-4 1 1-4Zm10-10 3 3',
+    moon: 'M20.9 13.3A8.9 8.9 0 0 1 10.7 3.1 9 9 0 1 0 20.9 13.3Z',
+    info: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM12 11v5m0-8v.1',
     user: 'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2m12-13a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z',
   };
   return (
@@ -46,7 +48,105 @@ function MarketIcon({ name, filled = false }) {
   );
 }
 
-function Header({ city, query, saved, link, navigate, onPost, onProfile, user, photo }) {
+const themePreferenceKey = 'rentmall-theme';
+
+function readDarkMode() {
+  try {
+    return localStorage.getItem(themePreferenceKey) === 'dark';
+  } catch {
+    return false;
+  }
+}
+
+function ProfileMenu({ user, photo, onProfile, navigate, aboutPage, profilePage }) {
+  const [open, setOpen] = useState(false);
+  const [darkMode, setDarkMode] = useState(readDarkMode);
+  const menu = useRef(null);
+  const trigger = useRef(null);
+
+  useLayoutEffect(() => {
+    document.documentElement.dataset.theme = darkMode ? 'dark' : 'light';
+  }, [darkMode]);
+
+  useEffect(() => {
+    if (!open) return;
+    function dismissOutside(event) {
+      if (!menu.current?.contains(event.target)) setOpen(false);
+    }
+    function dismissOnNavigation() {
+      setOpen(false);
+    }
+    document.addEventListener('pointerdown', dismissOutside);
+    window.addEventListener('popstate', dismissOnNavigation);
+    return () => {
+      document.removeEventListener('pointerdown', dismissOutside);
+      window.removeEventListener('popstate', dismissOnNavigation);
+    };
+  }, [open]);
+
+  function toggleTheme() {
+    setDarkMode(!darkMode);
+    try {
+      localStorage.setItem(themePreferenceKey, darkMode ? 'light' : 'dark');
+    } catch {
+      // The current page can still switch themes when storage is unavailable.
+    }
+  }
+
+  return (
+    <div className="profile-menu" ref={menu} onBlur={(event) => {
+      if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+    }} onKeyDown={(event) => {
+      if (event.key === 'Escape' && open) {
+        event.preventDefault();
+        setOpen(false);
+        trigger.current.focus();
+      }
+    }}>
+      <button ref={trigger} type="button" className="profile-button" aria-label="Profile menu"
+        aria-expanded={open} aria-controls="profile-options" onClick={() => setOpen(!open)}>
+        {photo ? <img className="profile-photo" src={photo} alt="" /> : user
+          ? <span aria-hidden="true">{(user.displayName?.trim() || user.email || 'R').charAt(0).toUpperCase()}</span>
+          : <MarketIcon name="user" />}
+      </button>
+      <div id="profile-options" className="profile-menu-panel" hidden={!open}>
+        <button type="button" className="profile-menu-item" aria-current={profilePage ? 'page' : undefined} onClick={() => {
+          setOpen(false);
+          onProfile();
+        }}><MarketIcon name="user" />Profile</button>
+        <button type="button" className="profile-menu-item" role="switch" aria-checked={darkMode} onClick={toggleTheme}>
+          <MarketIcon name="moon" />Dark mode
+          <span className="profile-menu-switch" aria-hidden="true" />
+        </button>
+        <NavLink href="/?about=1" className="profile-menu-item" aria-current={aboutPage ? 'page' : undefined} navigate={(url) => {
+          setOpen(false);
+          navigate(url);
+        }}><MarketIcon name="info" />About us</NavLink>
+      </div>
+    </div>
+  );
+}
+
+function AboutPage({ navigate }) {
+  return (
+    <main id="main-content" className="site-width about-page">
+      <NavLink href="/" navigate={navigate} className="back-link">Back to rentals</NavLink>
+      <header className="about-intro">
+        <h1>About RentMall</h1>
+        <p>We built RentMall as a student project to make it easier to find local rentals in Sahiwal. Renters can browse available listings, and owners can post ads, manage availability, and update their listings in one place.</p>
+      </header>
+      <section className="about-team" aria-labelledby="about-team-title">
+        <h2 id="about-team-title">Meet the team</h2>
+        <p>We worked together on the design, development, and testing of the marketplace.</p>
+        <ul>
+          {['Ameer Hamza', 'Uzair Kaleem', 'Hamza'].map((name) => <li key={name}>{name}</li>)}
+        </ul>
+      </section>
+    </main>
+  );
+}
+
+function Header({ city, query, saved, link, navigate, onPost, onProfile, user, photo, aboutPage, profilePage }) {
   function search(event) {
     event.preventDefault();
     navigate(link({ q: new FormData(event.currentTarget).get('q').trim(), listing: null, saved: null }));
@@ -67,11 +167,7 @@ function Header({ city, query, saved, link, navigate, onPost, onProfile, user, p
             <MarketIcon name="plus" />
             <span>Rent something out</span>
           </button>
-          <button type="button" className="profile-button" aria-label={user ? 'My profile' : 'Sign in or create an account'} onClick={onProfile}>
-            {photo ? <img className="profile-photo" src={photo} alt="" /> : user ? <span aria-hidden="true">{(user.displayName?.trim() || user.email || 'R').charAt(0).toUpperCase()}</span> : (
-              <MarketIcon name="user" />
-            )}
-          </button>
+          <ProfileMenu user={user} photo={photo} onProfile={onProfile} navigate={navigate} aboutPage={aboutPage} profilePage={profilePage} />
         </div>
       </div>
       <div className="site-width search-bar">
@@ -535,8 +631,9 @@ export function Marketplace() {
   }
 
   const params = new URLSearchParams(location);
-  const profilePage = params.get('profile') === '1';
-  const link = (changes) => changeUrl(params, { profile: null, from: null, ...changes });
+  const aboutPage = params.get('about') === '1';
+  const profilePage = !aboutPage && params.get('profile') === '1';
+  const link = (changes) => changeUrl(params, { about: null, profile: null, from: null, ...changes });
   const city = cities.find(({ id }) => id === params.get('city')) ?? cities[0];
   const category = categories.find(({ id }) => id === params.get('category'));
   const query = params.get('q')?.trim().slice(0, 80) ?? '';
@@ -568,9 +665,9 @@ export function Marketplace() {
       <Header city={city.id} query={query} saved={saved} link={link} navigate={navigate} onPost={showPosts} onProfile={() => {
         navigate('/?profile=1');
         if (!user) setModal({ name: 'account', continuation: { label: 'Open my profile' } });
-      }} user={user} photo={session.profile?.photo} />
-      {!profilePage && <CategoryNav category={category?.id} link={link} navigate={navigate} />}
-      {profilePage ? (
+      }} user={user} photo={session.profile?.photo} aboutPage={aboutPage} profilePage={profilePage} />
+      {!profilePage && !aboutPage && <CategoryNav category={category?.id} link={link} navigate={navigate} />}
+      {aboutPage ? <AboutPage navigate={navigate} /> : profilePage ? (
         uid && session.profile ? (
           <ProfilePage onAvailability={changeAvailability} onAdChange={(slug, changes) => {
             setLocalAds((ads) => changes ? ads.map((ad) => ad.slug === slug ? { ...ad, ...changes } : ad) : ads.filter((ad) => ad.slug !== slug));
