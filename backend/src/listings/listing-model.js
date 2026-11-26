@@ -3,6 +3,8 @@ import mongoose from 'mongoose';
 import { categories, rateUnits } from '../../../shared/catalog.js';
 import { maxKeywordLength, maxListingKeywords } from '../../../shared/listing-discovery.js';
 
+export const publishedSahiwal = { status: 'published', city: 'sahiwal' };
+
 const listingSchema = new mongoose.Schema({
   slug: { type: String, required: true, unique: true },
   adId: { type: String, unique: true, sparse: true, match: /^[1-8]\d{5}$/ },

@@ -1,9 +1,9 @@
 import { Router } from 'express';
-import { Listing } from './listing-model.js';
+import { Listing, publishedSahiwal } from './listing-model.js';
 import { rateUnits } from '../../../shared/catalog.js';
 import { listingSearchCriteria, listingSorts, matchesListingSearch, relatedSearchFields, searchableFields, sortListings } from '../../../shared/listing-discovery.js';
 
-const publicListing = { status: 'published', city: 'sahiwal', ownerUid: { $type: 'string', $ne: '' } };
+const publicListing = { ...publishedSahiwal, ownerUid: { $type: 'string', $ne: '' } };
 const publicFields = 'slug adId title category city area priceMinor rateUnit summary keywords terms photoUrl imageCount available ownerType createdAt updatedAt -_id';
 
 function readFilters(query) {

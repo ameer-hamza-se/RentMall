@@ -1,25 +1,27 @@
-export function saveRequest(user, { id, listing, startsAt, quantity }) {
-  return accountData(user, '/requests/' + encodeURIComponent(id), 'PUT', { listing, startsAt, quantity });
-}
-
+import { requestSignal } from '../../api/request-signal.js';
 const origin = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
 
-async function accountData(user, path, method = 'GET', body) {
+async function accountData(user, path, method = 'GET', body, signal) {
   const response = await fetch(origin + '/api/v1/account/me' + path, {
     method,
     headers: { Authorization: 'Bearer ' + await user.getIdToken(), ...(body ? { 'Content-Type': 'application/json' } : {}) },
     body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(15000),
+    signal: requestSignal(15000, signal),
   });
   if (!response.ok) {
     const result = await response.json().catch(() => null);
-    throw new Error(result?.error ?? 'Could not save your changes. Try again.');
+    throw new Error(result?.error ?? 'Could not complete your request. Try again.');
   }
   return response.status === 204 ? null : response.json();
 }
 
 export async function getOwnerAds(user) {
   return (await accountData(user, '/ads')).items;
+}
+
+export async function getListingContact(user, slug, signal) {
+  const { contact } = await accountData(user, '/listings/' + encodeURIComponent(slug) + '/contact', 'GET', undefined, signal);
+  return contact;
 }
 
 async function encodePhoto(file) {

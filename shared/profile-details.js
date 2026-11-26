@@ -1,9 +1,14 @@
+export function pakistanMobileNumber(value) {
+  const phone = typeof value === 'string' ? value.replace(/[\s()-]/g, '').replace(/^0(?=3)/, '+92') : '';
+  return /^\+923\d{9}$/.test(phone) ? phone : '';
+}
+
 export function validateDetails(profile = {}) {
   const field = (key) => typeof profile[key] === 'string' ? profile[key].trim() : '';
   const firstName = field('firstName');
   const lastName = field('lastName');
   const address = field('address');
-  const phone = field('phone').replace(/[\s()-]/g, '').replace(/^0(?=3)/, '+92');
+  const phone = pakistanMobileNumber(profile.phone);
   for (const [label, name] of [['first', firstName], ['last', lastName]]) {
     if (name.length > 60 || !/^\p{L}[\p{L}\p{M} .’'-]*$/u.test(name)) {
       return { error: 'Enter a valid ' + label + ' name.' };
@@ -12,6 +17,6 @@ export function validateDetails(profile = {}) {
   if (address.length < 5 || address.length > 250 || !/\p{L}/u.test(address)) {
     return { error: 'Enter your street or area and city (5 to 250 characters).' };
   }
-  if (!/^\+923\d{9}$/.test(phone)) return { error: 'Enter a Pakistan mobile number, for example +92 300 1234567.' };
+  if (!phone) return { error: 'Enter a Pakistan mobile number, for example +92 300 1234567.' };
   return { fields: { firstName, lastName, address, phone, name: firstName + ' ' + lastName } };
 }

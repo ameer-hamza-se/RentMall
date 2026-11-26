@@ -5,7 +5,9 @@ import { listingSearchCriteria, listingSorts, matchesListingSearch, sortListings
 import { getOwnerAds, editAvailability, deleteAd } from './marketplace-api.js';
 import { Dialog } from '../../components/dialog.jsx';
 import { ListingPhoto } from './listing-photo.jsx';
-import { PostRental, RentRequest } from './rental-dialogs.jsx';
+import { MarketIcon } from './market-icon.jsx';
+import { ListingContact } from './listing-contact.jsx';
+import { PostRental } from './rental-dialogs.jsx';
 import { useApi } from '../../api/use-api.js';
 
 const money = new Intl.NumberFormat('en-PK', { style: 'currency', currency: 'PKR', maximumFractionDigits: 0 });
@@ -28,27 +30,6 @@ function NavLink({ href, navigate, children, ...props }) {
       event.preventDefault();
       navigate(href);
     }}>{children}</a>
-  );
-}
-
-function MarketIcon({ name, filled = false }) {
-  const paths = {
-    heart: 'M20.8 4.6a5.4 5.4 0 0 0-7.6 0L12 5.8l-1.2-1.2a5.4 5.4 0 0 0-7.6 7.6l1.2 1.2L12 21l7.6-7.6 1.2-1.2a5.4 5.4 0 0 0 0-7.6Z',
-    pin: 'M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0ZM12 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z',
-    plus: 'M12 5v14M5 12h14',
-    search: 'm21 21-4.3-4.3M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z',
-    edit: 'm4 16 12-12a2 2 0 0 1 3 3L7 19l-4 1 1-4Zm10-10 3 3',
-    chevron: 'm6 9 6 6 6-6',
-    trash: 'M4 7h16m-11 0V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5',
-    refresh: 'M20 5v5h-5m5 0a8 8 0 0 0-14-4m-2 13v-5h5m-5 0a8 8 0 0 0 14 4',
-    moon: 'M20.9 13.3A8.9 8.9 0 0 1 10.7 3.1 9 9 0 1 0 20.9 13.3Z',
-    info: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM12 11v5m0-8v.1',
-    user: 'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2m12-13a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z',
-  };
-  return (
-    <svg className="market-icon" viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d={paths[name]} />
-    </svg>
   );
 }
 
@@ -170,9 +151,10 @@ function Header({ city, query, saved, link, navigate, onPost, onProfile, user, p
           <NavLink className="saved-link" href={link({ city: null, saved: saved ? null : '1', q: null, category: null, listing: null })} navigate={navigate} aria-label="Saved" aria-current={saved ? 'page' : undefined}>
             <MarketIcon name="heart" filled={saved} /><span className="saved-copy">Saved</span>
           </NavLink>
-          <button className="primary-button post-button" type="button" onClick={onPost} disabled={city !== 'sahiwal'}>
+          <button className="primary-button post-button" type="button" aria-label="Rent something out" onClick={onPost} disabled={city !== 'sahiwal'}>
             <MarketIcon name="plus" />
-            <span>Rent something out</span>
+            <span className="post-label-full">Rent something out</span>
+            <span className="post-label-short" aria-hidden="true">Post ad</span>
           </button>
           <ProfileMenu user={user} photo={photo} onProfile={onProfile} navigate={navigate} aboutPage={aboutPage} profilePage={profilePage} />
         </div>
@@ -312,7 +294,7 @@ function Hero() {
       <div className="hero-copy">
         <span className="hero-city"><MarketIcon name="pin" /> Sahiwal, Punjab</span>
         <h1>Rent from local owners</h1>
-        <p>Find vehicles, rooms, event spaces, tools and more in Sahiwal.</p>
+        <p>Find a car for the day, a room for the month, or tools for your next job.</p>
         <a href="#categories" className="hero-button">Explore rentals</a>
       </div>
       <figure className="hero-photo">
@@ -846,7 +828,7 @@ export function Marketplace() {
           catalog.retry();
         }} />
       )}
-      {uid && modal?.name === 'rent' && selected && selected.available !== false && <RentRequest item={selected} user={user} onClose={() => setModal(null)} />}
+      {uid && modal?.name === 'rent' && selected && selected.available !== false && <ListingContact key={slug} item={selected} user={user} onClose={() => setModal(null)} />}
     </>
   );
 }

@@ -1,3 +1,4 @@
+import { requestSignal } from './request-signal.js';
 import { useEffect, useState } from 'react';
 
 const apiOrigin = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
@@ -13,7 +14,7 @@ export function useApi(path, { paginate = false } = {}) {
       try {
         async function read(endpoint) {
           const response = await fetch(`${apiOrigin}/api/v1${endpoint}`, {
-            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]),
+            signal: requestSignal(10000, controller.signal),
           });
           const body = await response.json();
           if (!response.ok) throw new Error(body.error || 'Unable to load this page. Try again shortly.');

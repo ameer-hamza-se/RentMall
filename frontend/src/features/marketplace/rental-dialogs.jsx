@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { Dialog } from '../../components/dialog.jsx';
 import { categories, rateUnits } from '../../../../shared/catalog.js';
 import { maxKeywordLength, maxListingKeywords } from '../../../../shared/listing-discovery.js';
-import { editAd, publishAd, saveRequest } from './marketplace-api.js';
+import { editAd, publishAd } from './marketplace-api.js';
 import { ListingPhoto, UploadedPhoto } from './listing-photo.jsx';
 
 const policies = [
@@ -187,7 +187,7 @@ export function PostRental({ user, ownerUid, listing, onClose, onPosted, onUpdat
       {stage === 'policy' && (
         <div className="dialog-body">
           <p className="muted">Review these policies before publishing “{draft.title}”.</p>
-          <p className="muted">Your listing and the photos you attach will be visible to other visitors.</p>
+          <p className="muted">Your listing and its photos will be visible to visitors. Signed-in renters can use your profile’s mobile number to call or reach you on WhatsApp.</p>
           <ul className="policies">{policies.map((policy) => <li key={policy}>{policy}</li>)}</ul>
           {error && <p className="form-error" role="alert">{error}</p>}
           <div className="dialog-actions">
@@ -202,62 +202,6 @@ export function PostRental({ user, ownerUid, listing, onClose, onPosted, onUpdat
           <p>“{posted.title}” was posted. Ad ID {posted.adId}.</p>
           <button className="primary-button" type="button" onClick={() => onView(posted)}>View listing</button>
         </div>
-      )}
-    </Dialog>
-  );
-}
-
-const currency = new Intl.NumberFormat('en-PK', { style: 'currency', currency: 'PKR', maximumFractionDigits: 0 });
-
-export function RentRequest({ item, user, onClose }) {
-  const [quantity, setQuantity] = useState(1);
-  const [status, setStatus] = useState('form');
-  const [error, setError] = useState('');
-  const [requestId] = useState(() => crypto.randomUUID());
-  const [localTime] = useState(() => {
-    const now = new Date();
-    return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
-  });
-
-  async function submit(event) {
-    event.preventDefault();
-    if (status === 'saving') return;
-    const startsAt = new FormData(event.currentTarget).get('startsAt');
-    const timestamp = new Date(startsAt).getTime();
-    if (!Number.isFinite(timestamp) || timestamp <= Date.now()) {
-      setError('Choose a start time in the future.');
-      return;
-    }
-    setStatus('saving');
-    setError('');
-    try {
-      await saveRequest(user, { id: requestId, listing: item.slug, startsAt: new Date(timestamp).toISOString(), quantity: Number(quantity) });
-      setStatus('done');
-    } catch {
-      setStatus('form');
-      setError('Your request could not be saved. Try again.');
-    }
-  }
-
-  return (
-    <Dialog title={status === 'done' ? 'Rental request saved' : `Rent ${item.title}`} onClose={onClose} busy={status === 'saving'}>
-      {status === 'done' ? (
-        <div className="dialog-body confirmation">
-          <span className="success-mark" aria-hidden="true">✓</span>
-          <p>Your demo request was saved to your RentMall account.</p>
-          <button className="primary-button" type="button" onClick={onClose}>Done</button>
-        </div>
-      ) : (
-        <form className="dialog-body ad-form" onSubmit={submit}>
-          <p className="muted">Save a demo request for your preferred time. Availability and payment are arranged separately.</p>
-          <div className="field-pair">
-            <label>Start date and time<input type="datetime-local" name="startsAt" min={localTime} required /></label>
-            <label>Number of {item.rateUnit}s<input type="number" min="1" max="365" required value={quantity} onChange={(event) => setQuantity(event.target.value)} /></label>
-          </div>
-          <div className="estimate"><span>Estimated rental price</span><strong>{currency.format(item.priceMinor * (Number(quantity) || 0) / 100)}</strong></div>
-          {error && <p className="form-error" role="alert">{error}</p>}
-          <button className="primary-button full-button" type="submit" disabled={status === 'saving'}>Save rental request</button>
-        </form>
       )}
     </Dialog>
   );

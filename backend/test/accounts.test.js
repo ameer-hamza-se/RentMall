@@ -197,3 +197,41 @@ test('ad edits, availability and deletion are scoped to the owner and work with 
   assert.equal(ad, null);
   assert.equal((await request('first', 'PATCH', fields, path)).status, 404);
 });
+
+test('contact details require a complete signed-in profile and a currently available public ad', async ({ mock }) => {
+  records.set('contact-owner', {
+    name: 'Listing Owner', businessName: 'Sahiwal Rentals', phone: '0300 1234567',
+    photo: 'data:image/jpeg;base64,/9j/2Q==', address: 'Private address, Sahiwal',
+    createdAt: new Date('2023-05-01T10:00:00Z'),
+  });
+  mock.method(Listing, 'findOne', (filter) => ({
+    select: () => ({
+      lean: async () => {
+        assert.equal(filter.status, 'published');
+        assert.equal(filter.city, 'sahiwal');
+        assert.deepEqual(filter.available, { $ne: false });
+        return filter.slug === '123456' ? { ownerUid: 'contact-owner', ownerType: 'business' } : null;
+      },
+    }),
+  }));
+  mock.method(Listing, 'countDocuments', async (filter) => {
+    assert.deepEqual(filter, { status: 'published', city: 'sahiwal', ownerUid: 'contact-owner' });
+    return 2;
+  });
+
+  const path = '/listings/123456/contact';
+  assert.equal((await request(null, 'GET', undefined, path)).status, 401);
+  assert.equal((await request('second', 'GET', undefined, path)).status, 403);
+  assert.equal((await request('first', 'GET', undefined, '/listings/999999/contact')).status, 404);
+
+  const response = await request('first', 'GET', undefined, path);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('Cache-Control'), 'no-store');
+  assert.deepEqual(await response.json(), {
+    contact: { name: 'Sahiwal Rentals', phone: '+923001234567', photo: 'data:image/jpeg;base64,/9j/2Q==', memberSince: 2023, activeAds: 2 },
+  });
+
+  records.get('contact-owner').phone = '';
+  const missingPhone = await request('first', 'GET', undefined, path);
+  assert.equal((await missingPhone.json()).contact.phone, null);
+});

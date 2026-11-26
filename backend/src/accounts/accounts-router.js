@@ -1,5 +1,5 @@
-import { Listing, publishNumberedAd } from '../listings/listing-model.js';
-import { validateDetails } from '../../../shared/profile-details.js';
+import { Listing, publishedSahiwal, publishNumberedAd } from '../listings/listing-model.js';
+import { pakistanMobileNumber, validateDetails } from '../../../shared/profile-details.js';
 import express from 'express';
 import mongoose from 'mongoose';
 
@@ -119,6 +119,35 @@ export function createAccountsRouter({ verifyToken, profiles, isReady } = {}) {
       return response.status(503).json({ error: 'Account services are unavailable. Try again shortly.' });
     }
     next();
+  });
+
+  router.get('/me/listings/:slug/contact', async (request, response) => {
+    const { slug } = request.params;
+    if (!/^[a-z0-9-]{1,180}$/.test(slug)) {
+      return response.status(404).json({ error: 'This ad is unavailable.' });
+    }
+
+    const viewer = await profiles.find(request.identity.uid);
+    if (!viewer || validateDetails(viewer).error) {
+      return response.status(403).json({ error: 'Complete your profile to contact the owner.' });
+    }
+
+    const listing = await Listing.findOne({
+      ...publishedSahiwal, slug, available: { $ne: false }, ownerUid: { $type: 'string', $ne: '' },
+    }).select('ownerUid ownerType -_id').lean();
+    if (!listing) return response.status(404).json({ error: 'This ad is unavailable.' });
+
+    const owner = listing.ownerUid === request.identity.uid ? viewer : await profiles.find(listing.ownerUid);
+    const name = (listing.ownerType === 'business' && owner?.businessName) || owner?.name;
+    const createdAt = owner?.createdAt ? new Date(owner.createdAt) : null;
+    const activeAds = await Listing.countDocuments({ ...publishedSahiwal, ownerUid: listing.ownerUid });
+    response.json({ contact: {
+      name: name || 'Listing owner',
+      photo: validPhoto(owner?.photo) ? owner.photo : null,
+      memberSince: createdAt?.getUTCFullYear() || null,
+      activeAds,
+      phone: pakistanMobileNumber(owner?.phone) || null,
+    } });
   });
 
   router.get('/me/ads', async (request, response) => {

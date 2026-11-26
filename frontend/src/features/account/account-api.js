@@ -1,3 +1,4 @@
+import { requestSignal } from '../../api/request-signal.js';
 import { initializeApp } from 'firebase/app';
 import { getAuth, onAuthStateChanged, signOut } from 'firebase/auth';
 
@@ -48,7 +49,6 @@ async function importBrowserFavorites(user, saved, signal) {
 }
 
 async function requestMongoProfile(user, { method, profile, signal, path }) {
-  const timeout = AbortSignal.timeout(10000);
   const response = await fetch(`${apiOrigin}/api/v1/account/me${path}`, {
     method,
     headers: {
@@ -56,7 +56,7 @@ async function requestMongoProfile(user, { method, profile, signal, path }) {
       ...(profile ? { 'Content-Type': 'application/json' } : {}),
     },
     ...(profile ? { body: JSON.stringify(profile) } : {}),
-    signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+    signal: requestSignal(10000, signal),
   });
   const result = await response.json().catch(() => null);
   if (!response.ok || !result) throw new Error(result?.error ?? 'Could not reach your profile. Try again shortly.');
