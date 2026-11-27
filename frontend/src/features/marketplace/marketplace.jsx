@@ -43,7 +43,7 @@ function readDarkMode() {
   }
 }
 
-function ProfileMenu({ user, photo, onProfile, navigate, aboutPage, profilePage }) {
+function ProfileMenu({ user, photo, accountPending, onSignIn, onProfile, navigate, aboutPage, profilePage }) {
   const [open, setOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(readDarkMode);
   const menu = useRef(null);
@@ -88,20 +88,31 @@ function ProfileMenu({ user, photo, onProfile, navigate, aboutPage, profilePage 
         trigger.current.focus();
       }
     }}>
-      <button ref={trigger} type="button" className="profile-button" aria-label="Profile menu"
-        aria-expanded={open} aria-controls="profile-options" onClick={() => setOpen(!open)}>
-        <span className="profile-avatar" aria-hidden="true">
-          {photo ? <img className="profile-photo" src={photo} alt="" /> : user
-            ? (user.displayName?.trim() || user.email || 'R').charAt(0).toUpperCase()
-            : <MarketIcon name="user" />}
-        </span>
-        <span className="profile-chevron"><MarketIcon name="chevron" /></span>
-      </button>
-      <div id="profile-options" className="profile-menu-panel" hidden={!open}>
-        <button type="button" className="profile-menu-item" aria-current={profilePage ? 'page' : undefined} onClick={() => {
+      {accountPending ? (
+        <span className="header-account-placeholder" aria-hidden="true" />
+      ) : user ? (
+        <button ref={trigger} type="button" className="profile-button" aria-label="Profile menu"
+          aria-expanded={open} aria-controls="profile-options" onClick={() => setOpen(!open)}>
+          <span className="profile-avatar" aria-hidden="true">
+            {photo ? <img className="profile-photo" src={photo} alt="" />
+              : (user.displayName?.trim() || user.email || 'R').charAt(0).toUpperCase()}
+          </span>
+          <span className="profile-chevron"><MarketIcon name="chevron" /></span>
+        </button>
+      ) : (
+        <div className="guest-account">
+          <button type="button" className="header-signin" onClick={() => { setOpen(false); onSignIn(); }}>Sign in</button>
+          <button ref={trigger} type="button" className="profile-button guest-options" aria-label="Site options"
+            aria-expanded={open} aria-controls="profile-options" onClick={() => setOpen(!open)}>
+            <span className="profile-chevron"><MarketIcon name="chevron" /></span>
+          </button>
+        </div>
+      )}
+      <div id="profile-options" className="profile-menu-panel" hidden={!open || accountPending}>
+        {user && <button type="button" className="profile-menu-item" aria-current={profilePage ? 'page' : undefined} onClick={() => {
           setOpen(false);
           onProfile();
-        }}><MarketIcon name="user" />Profile</button>
+        }}><MarketIcon name="user" />Profile</button>}
         <button type="button" className="profile-menu-item" role="switch" aria-checked={darkMode} onClick={toggleTheme}>
           <MarketIcon name="moon" />Dark mode
           <span className="profile-menu-switch" aria-hidden="true" />
@@ -134,7 +145,7 @@ function AboutPage({ navigate }) {
   );
 }
 
-function Header({ city, query, saved, link, navigate, onPost, onProfile, user, photo, aboutPage, profilePage }) {
+function Header({ city, query, saved, link, navigate, onPost, onSignIn, onProfile, accountPending, user, photo, aboutPage, profilePage }) {
   function search(event) {
     event.preventDefault();
     navigate(link({ q: new FormData(event.currentTarget).get('q').trim(), listing: null, saved: null }));
@@ -156,7 +167,7 @@ function Header({ city, query, saved, link, navigate, onPost, onProfile, user, p
             <span className="post-label-full">Rent something out</span>
             <span className="post-label-short" aria-hidden="true">Post ad</span>
           </button>
-          <ProfileMenu user={user} photo={photo} onProfile={onProfile} navigate={navigate} aboutPage={aboutPage} profilePage={profilePage} />
+          <ProfileMenu user={user} photo={photo} accountPending={accountPending} onSignIn={onSignIn} onProfile={onProfile} navigate={navigate} aboutPage={aboutPage} profilePage={profilePage} />
         </div>
       </div>
       <div className="site-width search-bar">
@@ -737,10 +748,9 @@ export function Marketplace() {
   return (
     <>
       <a className="skip-link" href="#main-content">Skip to content</a>
-      <Header city={city.id} query={query} saved={saved} link={link} navigate={navigate} onPost={showPosts} onProfile={() => {
-        navigate('/?profile=1');
-        if (!user) setModal({ name: 'account', continuation: { label: 'Open my profile' } });
-      }} user={user} photo={session.profile?.photo} aboutPage={aboutPage} profilePage={profilePage} />
+      <Header city={city.id} query={query} saved={saved} link={link} navigate={navigate} onPost={showPosts}
+        onSignIn={() => setModal({ name: 'account', openProfile: true })} onProfile={() => navigate('/?profile=1')}
+        accountPending={!ready && !user} user={user} photo={session.profile?.photo} aboutPage={aboutPage} profilePage={profilePage} />
       {!profilePage && !aboutPage && <CategoryNav category={category?.id} link={link} navigate={navigate} />}
       {aboutPage ? <AboutPage navigate={navigate} /> : profilePage ? (
         uid && session.profile ? (
@@ -842,10 +852,11 @@ export function Marketplace() {
               if (modal.continuation?.name) setModal({ ...modal, editing: false, onboarding: false });
               else {
                 setModal(null);
-                if (!slug && !saved) navigate('/?profile=1');
+                if (modal.openProfile || (!slug && !saved)) navigate('/?profile=1');
               }
             }}
             onAuthenticated={(isNew) => {
+              if (!isNew && modal.openProfile) navigate('/?profile=1');
               setModal((previous) => {
                 if (previous?.name !== 'account') return previous;
                 if (isNew) return { ...previous, onboarding: true };

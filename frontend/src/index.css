@@ -76,6 +76,11 @@ button:disabled, input:disabled { opacity: .55; cursor: default; }
 .header-actions { gap: 1rem; }
 .profile-button { display: flex; align-items: center; gap: .25rem; min-height: 2.75rem; border-radius: 2rem; color: var(--ink); font-weight: 600; }
 .profile-avatar { display: grid; flex: none; place-items: center; width: 2.5rem; aspect-ratio: 1; overflow: hidden; border: 1px solid var(--line); border-radius: 50%; background: var(--surface); transition: border-color .16s var(--ease-out), background-color .16s var(--ease-out); }
+.guest-account { display: flex; align-items: center; gap: .125rem; }
+.header-signin { min-height: 2.75rem; color: var(--violet); font-weight: 600; white-space: nowrap; }
+.header-signin:hover { text-decoration: underline; text-underline-offset: .2em; }
+.guest-options { justify-content: center; width: 1.5rem; }
+.header-account-placeholder { display: block; width: 3.5rem; height: 2.75rem; }
 .profile-button:hover .profile-avatar { background: var(--raised); }
 .profile-chevron { color: var(--secondary); transition: transform .22s var(--ease-out), color .16s var(--ease-out); }
 .profile-chevron .market-icon { width: .95rem; height: .95rem; }
@@ -310,6 +315,10 @@ body:has(.rental-dialog[open]) { overflow: hidden; }
   .price strong { font-size: 1.03rem; }
   .card-info h3, .card-location { font-size: .875rem; }
   .field-pair { gap: .53rem; }
+}
+@media (max-width: 29rem) {
+  .topbar:has(.guest-account) .post-label-full { display: none; }
+  .topbar:has(.guest-account) .post-label-short { display: inline; }
 }
 @media (max-width: 27rem) {
   .post-label-full { display: none; }
