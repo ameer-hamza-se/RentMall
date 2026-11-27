@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Dialog } from '../../components/dialog.jsx';
 import { MarketIcon } from './market-icon.jsx';
+import { ProfileAvatar } from './profile-avatar.jsx';
 import { getListingContact } from './marketplace-api.js';
 
 export function ListingContact({ item, user, onClose }) {
@@ -48,9 +49,7 @@ export function ListingContact({ item, user, onClose }) {
           <>
             <section className="contact-owner" aria-label="Listing owner">
               <div className="contact-identity">
-                <span className="contact-avatar" aria-hidden="true">
-                  {contact.photo ? <img className="profile-photo" src={contact.photo} alt="" /> : contact.name.charAt(0).toUpperCase()}
-                </span>
+                <ProfileAvatar className="contact-avatar" photo={contact.photo} />
                 <div>
                   <p className="muted">Posted by</p>
                   <h3>{contact.name}</h3>

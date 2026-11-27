@@ -6,6 +6,7 @@ import { getOwnerAds, editAvailability, deleteAd } from './marketplace-api.js';
 import { Dialog } from '../../components/dialog.jsx';
 import { ListingPhoto } from './listing-photo.jsx';
 import { MarketIcon } from './market-icon.jsx';
+import { ProfileAvatar } from './profile-avatar.jsx';
 import { ListingContact } from './listing-contact.jsx';
 import { PostRental } from './rental-dialogs.jsx';
 import { useApi } from '../../api/use-api.js';
@@ -93,10 +94,7 @@ function ProfileMenu({ user, photo, accountPending, onSignIn, onProfile, navigat
       ) : user ? (
         <button ref={trigger} type="button" className="profile-button" aria-label="Profile menu"
           aria-expanded={open} aria-controls="profile-options" onClick={() => setOpen(!open)}>
-          <span className="profile-avatar" aria-hidden="true">
-            {photo ? <img className="profile-photo" src={photo} alt="" />
-              : (user.displayName?.trim() || user.email || 'R').charAt(0).toUpperCase()}
-          </span>
+          <ProfileAvatar className="profile-avatar" photo={photo} />
           <span className="profile-chevron"><MarketIcon name="chevron" /></span>
         </button>
       ) : (
@@ -524,9 +522,7 @@ function ProfilePage({ user, profile, onPhoto, ads, adsFailed, retryAds, adActio
           </button>
           <div className="profile-details" id="profile-details" data-open={detailsOpen}>
             <div className="profile-identity">
-              <span className="profile-initial" aria-hidden="true">
-                {profile.photo ? <img src={profile.photo} className="profile-photo" alt="" /> : <>{profile.firstName[0]}{profile.lastName[0]}</>}
-              </span>
+              <ProfileAvatar className="profile-details-avatar" photo={profile.photo} />
               <h2>{profile.name}</h2>
             </div>
             <label className="profile-photo-label">
