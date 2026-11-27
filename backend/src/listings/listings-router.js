@@ -90,7 +90,10 @@ export function createListingsRouter({ useDatabase, fallbackListings }) {
     if (!/^[0-4]$/.test(index) || !useDatabase) return response.sendStatus(404);
     const item = await Listing.findOne({ ...publicListing, slug }, { images: { $slice: [Number(index), 1] } }).schemaLevelProjections(false).lean();
     if (!item?.images?.[0]) return response.sendStatus(404);
-    response.set('Cross-Origin-Resource-Policy', 'cross-origin').type('jpeg').send(Buffer.from(item.images[0].split(',')[1], 'base64'));
+    response.set({
+      'Cross-Origin-Resource-Policy': 'cross-origin',
+      'Cache-Control': 'public, max-age=60, must-revalidate',
+    }).type('jpeg').send(Buffer.from(item.images[0].split(',')[1], 'base64'));
   });
 
   router.get('/:slug', async (request, response) => {

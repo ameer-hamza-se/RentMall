@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { after, before, test } from 'node:test';
 import { createApp } from '../src/app.js';
+import { Listing } from '../src/listings/listing-model.js';
 
 const testListings = [
   { slug: 'test-hatchback', title: 'Compact hatchback', category: 'vehicles', rateUnit: 'day', priceMinor: 550000, area: 'Farid Town' },
@@ -100,4 +101,47 @@ test('the normal unconfigured API exposes zero ads and no former demo detail', a
     blank.close();
     await once(blank, 'close');
   }
+});
+
+test('the API reports brief database failures and recovers without changing the listing route', async (context) => {
+  let database = 'disconnected';
+  let queryFailed = true;
+  const regressionServer = createApp({
+    allowedOrigins: [], getDatabaseStatus: () => database, useDatabase: true, revision: 'test123',
+  }).listen(0, '127.0.0.1');
+  await once(regressionServer, 'listening');
+  context.after(() => new Promise((resolve) => regressionServer.close(resolve)));
+  const api = 'http://127.0.0.1:' + regressionServer.address().port + '/api/v1';
+
+  context.mock.method(Listing, 'findOne', () => ({
+    select: () => ({
+      lean: async () => {
+        if (queryFailed) throw Object.assign(new Error('Database connection interrupted'), { name: 'MongoNetworkError' });
+        return testListings[0];
+      },
+    }),
+  }));
+
+  const initialHealth = await fetch(api + '/health');
+  assert.equal(initialHealth.status, 503);
+  assert.deepEqual(await initialHealth.json(), { status: 'unavailable', database: 'disconnected', revision: 'test123' });
+
+  const itemUrl = api + '/listings/' + testListings[0].slug;
+  const disconnected = await fetch(itemUrl);
+  assert.equal(disconnected.status, 503);
+  assert.equal(disconnected.headers.get('Retry-After'), '2');
+  await disconnected.json();
+
+  database = 'connected';
+  const interrupted = await fetch(itemUrl);
+  assert.equal(interrupted.status, 503);
+  await interrupted.json();
+
+  queryFailed = false;
+  const recoveredHealth = await fetch(api + '/health');
+  assert.equal(recoveredHealth.status, 200);
+  assert.deepEqual(await recoveredHealth.json(), { status: 'ok', database: 'connected', revision: 'test123' });
+  const recovered = await fetch(itemUrl);
+  assert.equal(recovered.status, 200);
+  assert.deepEqual((await recovered.json()).item, testListings[0]);
 });

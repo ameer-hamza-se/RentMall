@@ -1,3 +1,4 @@
+import { setTimeout as delay } from 'node:timers/promises';
 import mongoose from 'mongoose';
 import { applicationDefault, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
@@ -26,9 +27,26 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
   process.exit(1);
 }
 
+async function connectToAtlas(uri) {
+  const retryDelays = [1_500, 4_000];
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await mongoose.connect(uri, { serverSelectionTimeoutMS: 8_000, connectTimeoutMS: 5_000 });
+      return;
+    } catch (error) {
+      if (error.name !== 'MongooseServerSelectionError' || attempt >= retryDelays.length) throw error;
+      console.warn('Atlas is temporarily unreachable during startup. Retrying.');
+      await delay(retryDelays[attempt]);
+    }
+  }
+}
+
 if (mongoUri) {
+  mongoose.connection.on('disconnected', () => console.warn('Atlas disconnected'));
+  mongoose.connection.on('reconnected', () => console.info('Atlas reconnected'));
+  mongoose.connection.on('error', (error) => console.warn('Atlas connection error', error.name));
   try {
-    await mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 5000 });
+    await connectToAtlas(mongoUri);
     await Listing.init();
     for await (const ad of Listing.find({ ownerUid: { $exists: true }, adId: { $exists: false } }).select('adId').cursor()) {
       await ensureAdNumber(ad);
@@ -55,7 +73,13 @@ if (mongoUri && firebaseProjectId) {
   };
 }
 
-const app = createApp({ allowedOrigins, getDatabaseStatus, useDatabase: Boolean(mongoUri), accounts });
+const app = createApp({
+  allowedOrigins,
+  getDatabaseStatus,
+  useDatabase: Boolean(mongoUri),
+  accounts,
+  revision: process.env.RENDER_GIT_COMMIT?.slice(0, 7),
+});
 
 app.listen(port, host, () => {
   console.log(`RentMall API listening at http://${host}:${port}`);

@@ -339,11 +339,13 @@ function ListingSkeletons({ count = 4 } = {}) {
   );
 }
 
-function DetailSkeleton({ backUrl, navigate }) {
+function DetailSkeleton({ backUrl, navigate, reconnecting }) {
   return (
     <main className="site-width detail-page" id="main-content">
       <NavLink className="back-link" href={backUrl} navigate={navigate}>Back to rentals</NavLink>
-      <span className="sr-only" role="status">Loading rental details…</span>
+      <p className={reconnecting ? 'connection-note muted' : 'sr-only'} role="status">
+        {reconnecting ? 'Reconnecting to RentMall…' : 'Loading rental details…'}
+      </p>
       <div className="detail-layout" aria-hidden="true">
         <div className="detail-image"><div className="listing-photo skeleton" /></div>
         <div className="detail-content">
@@ -431,11 +433,13 @@ function Detail({ item, onRent, actions, backUrl, navigate }) {
   );
 }
 
-function ProfileSkeleton() {
+function ProfileSkeleton({ reconnecting }) {
   return (
     <main className="site-width profile-page" id="main-content" aria-busy="true">
       <h1>My profile</h1>
-      <p className="sr-only" role="status">Loading your profile…</p>
+      <p className={reconnecting ? 'connection-note muted' : 'sr-only'} role="status">
+        {reconnecting ? 'Reconnecting to load your profile…' : 'Loading your profile…'}
+      </p>
       <div className="profile-layout" aria-hidden="true">
         <div className="profile-sidebar profile-details">
           <div className="skeleton profile-avatar-skeleton" />
@@ -449,7 +453,7 @@ function ProfileSkeleton() {
   );
 }
 
-function ProfilePage({ user, profile, onPhoto, ads, adActions, navigate, onEdit, onPost }) {
+function ProfilePage({ user, profile, onPhoto, ads, adsFailed, retryAds, adActions, navigate, onEdit, onPost }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -542,7 +546,11 @@ function ProfilePage({ user, profile, onPhoto, ads, adActions, navigate, onEdit,
             </div>
             <button className="primary-button" type="button" onClick={onPost}>Post an ad</button>
           </div>
-          {ads === null ? (
+          {adsFailed && <div className="state-box" role="status">
+            <p>Could not load your ads.</p>
+            <button className="secondary-button" type="button" onClick={retryAds}>Try again</button>
+          </div>}
+          {ads === null ? !adsFailed && (
             <div aria-busy="true">
               <p className="sr-only" role="status">Loading your ads…</p>
               <ListingSkeletons count={2} />
@@ -561,9 +569,9 @@ function ProfilePage({ user, profile, onPhoto, ads, adActions, navigate, onEdit,
 }
 
 export function Marketplace() {
-  const catalog = useApi('/listings?city=sahiwal&limit=60', { paginate: true });
   const [location, setLocation] = useState(window.location.search);
-  const [localAds, setLocalAds] = useState(null);
+  const [ownerAds, setOwnerAds] = useState(null);
+  const [adsAttempt, setAdsAttempt] = useState(0);
   const [modal, setModal] = useState(null);
   const [profileAttempt, setProfileAttempt] = useState(0);
   const [session, setSession] = useState({ ready: false, user: null });
@@ -571,14 +579,23 @@ export function Marketplace() {
   useEffect(() => {
     let active = true;
     let unsubscribe;
+    let profileRequest;
     import('../account/account-api.js').then(({ watchAccount, requestProfile }) => {
       let generation = 0;
       if (active) unsubscribe = watchAccount(async (user) => {
         const current = ++generation;
+        profileRequest?.abort();
         setSession({ ready: !user, user });
         if (!user) return;
         try {
-          const profile = await requestProfile(user);
+          profileRequest = new AbortController();
+          const profile = await requestProfile(user, {
+            signal: profileRequest.signal,
+            onRetry: () => {
+              if (!active || current !== generation) return;
+              setSession((previous) => previous.reconnecting ? previous : { ...previous, reconnecting: true });
+            },
+          });
           if (!active || current !== generation) return;
           const complete = !!profile && !validateDetails(profile).error;
           setSession({ ready: true, user, complete, profile });
@@ -589,19 +606,31 @@ export function Marketplace() {
     }).catch(() => {
       if (active) setSession({ ready: true, user: null });
     });
-    return () => { active = false; unsubscribe?.(); };
+    return () => { active = false; profileRequest?.abort(); unsubscribe?.(); };
   }, [profileAttempt]);
 
   const { ready, user } = session;
   const uid = session.complete ? user?.uid : null;
   const favorites = session.profile?.favorites ?? [];
-  const ownedLocal = localAds?.filter((ad) => uid && ad.ownerUid === uid) ?? [];
-  const myAds = localAds === null ? null : ownedLocal;
+  const myAds = uid && ownerAds?.uid === uid ? ownerAds.items : null;
+  const ownedLocal = myAds ?? [];
+  const adsFailed = ownerAds?.uid === uid && !!ownerAds?.failed;
+
+  function updateOwnAds(update) {
+    setOwnerAds((previous) => ({
+      uid, items: update(previous?.uid === uid ? previous.items : null),
+    }));
+  }
+
+  function retryOwnAds() {
+    setOwnerAds((previous) => previous?.uid === uid ? { ...previous, failed: false } : previous);
+    setAdsAttempt((attempt) => attempt + 1);
+  }
 
   async function changeAvailability(item, available) {
     await editAvailability(user, item.slug, available);
-    catalog.retry();
-    setLocalAds((ads) => ads?.map((ad) => ad.slug === item.slug && ad.ownerUid === uid ? { ...ad, available } : ad));
+    catalog.invalidate();
+    updateOwnAds((ads) => ads?.map((ad) => ad.slug === item.slug ? { ...ad, available } : ad));
   }
 
   useEffect(() => {
@@ -611,13 +640,17 @@ export function Marketplace() {
   }, []);
 
   useEffect(() => {
-    let current = true;
-    const source = user ? getOwnerAds(user) : Promise.resolve([]);
-    source.then((ads) => {
-      if (current) setLocalAds(ads);
-    }).catch(() => { if (current) setLocalAds((existing) => existing ?? []); });
-    return () => { current = false; };
-  }, [user]);
+    if (!user) return;
+    const controller = new AbortController();
+    getOwnerAds(user, controller.signal).then((items) => {
+      if (!controller.signal.aborted) setOwnerAds({ uid: user.uid, items });
+    }).catch(() => {
+      if (!controller.signal.aborted) setOwnerAds((previous) => ({
+        uid: user.uid, items: previous?.uid === user.uid ? previous.items : null, failed: true,
+      }));
+    });
+    return () => controller.abort();
+  }, [user, adsAttempt]);
 
   function navigate(url) {
     if (url !== window.location.pathname + window.location.search) window.history.pushState(null, '', url);
@@ -627,7 +660,7 @@ export function Marketplace() {
 
   function navigateToAccountPage(url) {
     navigate(url);
-    if (!uid) {
+    if (ready && !user) {
       setModal({ name: 'account', continuation: { label: 'Continue to listing' } });
     }
   }
@@ -675,16 +708,20 @@ export function Marketplace() {
   const maxPrice = unit && /^[1-9]\d{0,6}$/.test(params.get('maxPrice') ?? '') ? params.get('maxPrice') : '';
   const saved = params.get('saved') === '1';
   const slug = params.get('listing');
+  const browse = !aboutPage && !profilePage && city.id === 'sahiwal';
+  const catalog = useApi('/listings?city=sahiwal&limit=60', { enabled: browse && !slug, paginate: true, cache: true });
+  const detail = useApi(slug ? '/listings/' + encodeURIComponent(slug) : null, { enabled: browse && !!slug });
   const ownedSlugs = new Set(ownedLocal.map((ad) => ad.slug));
   const all = [...(catalog.body?.items ?? []).filter((ad) => !ownedSlugs.has(ad.slug)), ...ownedLocal];
-  const selected = slug && all.find((item) => item.slug === slug);
+  const selected = slug && (ownedLocal.find((item) => item.slug === slug)
+    ?? (detail.errorStatus === 404 ? null : detail.body?.item ?? catalog.body?.items.find((item) => item.slug === slug)));
   const detailBackUrl = params.get('from') === 'profile' ? '/?profile=1' : link({ listing: null });
   const adActions = {
     availability: changeAvailability,
     edit: (item) => setModal({ name: 'edit-ad', item }),
     remove: (item) => setModal({ name: 'delete-ad', item }),
   };
-  const loading = catalog.status === 'loading' || localAds === null;
+  const loading = catalog.status === 'loading' && !catalog.body;
   const filtered = sortListings(all.filter((item) => (
     (!category || item.category === category.id)
     && matchesListingSearch(item, search)
@@ -709,9 +746,9 @@ export function Marketplace() {
         uid && session.profile ? (
           <ProfilePage key={uid} user={user} profile={session.profile} onPhoto={(photo) => {
             setSession((previous) => previous.user?.uid === uid ? { ...previous, profile: { ...previous.profile, photo } } : previous);
-          }} ads={myAds} adActions={adActions} navigate={navigate} onEdit={() => setModal({ name: 'account', editing: true })} onPost={showPosts} />
+          }} ads={myAds} adsFailed={adsFailed} retryAds={retryOwnAds} adActions={adActions} navigate={navigate} onEdit={() => setModal({ name: 'account', editing: true })} onPost={showPosts} />
         ) : (
-          !ready ? <ProfileSkeleton /> : <main className="site-width unavailable" id="main-content">
+          !ready ? <ProfileSkeleton reconnecting={session.reconnecting} /> : <main className="site-width unavailable" id="main-content">
             <h1>My profile</h1>
             {session.profileError ? (
               <>
@@ -735,17 +772,26 @@ export function Marketplace() {
         </main>
       ) : !uid && (slug || saved) ? (
         <main className="site-width unavailable" id="main-content">
-          <h1>{ready ? (saved ? 'Sign in to see saved rentals' : 'Sign in to view this listing') : 'Checking your sign-in…'}</h1>
-          {ready && <button type="button" className="primary-button" onClick={() => setModal({ name: 'account', continuation: { label: saved ? 'Continue to saved rentals' : 'Continue to listing' } })}>Sign in or create an account</button>}
+          <h1>{session.profileError ? 'Could not load your saved profile' : !ready
+            ? (session.reconnecting ? 'Reconnecting to load your profile…' : 'Checking your sign-in…')
+            : (saved ? 'Sign in to see saved rentals' : 'Sign in to view this listing')}</h1>
+          {session.profileError ? (
+            <button type="button" className="secondary-button" onClick={() => setProfileAttempt((value) => value + 1)}>Try again</button>
+          ) : ready && (
+            <button type="button" className="primary-button" onClick={() => setModal({ name: 'account', continuation: { label: saved ? 'Continue to saved rentals' : 'Continue to listing' } })}>
+              {user ? 'Complete your profile' : 'Sign in or create an account'}
+            </button>
+          )}
           <NavLink className="back-link" href={link({ listing: null, saved: null })} navigate={navigate}>Back to rentals</NavLink>
         </main>
       ) : slug ? (
-        selected ? <Detail key={slug} item={selected} actions={ownedSlugs.has(selected.slug) ? adActions : undefined} onRent={() => setModal({ name: 'rent' })} backUrl={detailBackUrl} navigate={navigate} /> : loading ? (
-          <DetailSkeleton backUrl={link({ listing: null })} navigate={navigate} />
+        selected ? <Detail key={slug} item={selected} actions={ownedSlugs.has(selected.slug) ? adActions : undefined} onRent={() => setModal({ name: 'rent' })} backUrl={detailBackUrl} navigate={navigate} /> : detail.status === 'loading' ? (
+          <DetailSkeleton backUrl={detailBackUrl} navigate={navigate} reconnecting={detail.reconnecting} />
         ) : (
           <main className="site-width unavailable" id="main-content">
-            <h1>{(catalog.status === 'error') ? 'Unable to load rental' : 'Listing not found'}</h1>
-            <NavLink className="primary-button" href={link({ listing: null })} navigate={navigate}>Back to rentals</NavLink>
+            <h1>{detail.errorStatus === 404 ? 'Listing not found' : 'Unable to load rental'}</h1>
+            {detail.errorStatus !== 404 && <button className="secondary-button" type="button" onClick={detail.retry}>Try again</button>}
+            <NavLink className="primary-button" href={detailBackUrl} navigate={navigate}>Back to rentals</NavLink>
           </main>
         )
       ) : (
@@ -762,8 +808,12 @@ export function Marketplace() {
               </div>
               <Filters key={`${unit}:${maxPrice}:${sort}`} units={unit} maxPrice={maxPrice} sort={sort} onApply={(changes) => navigate(link(changes))} />
             </div>
+            {catalog.reconnecting && <p className="connection-note muted" role="status">Reconnecting to RentMall…</p>}
             {loading && <ListingSkeletons />}
-            {(catalog.status === 'error') && <div className="state-box" role="status"><p>{catalog.message}</p><button className="secondary-button" type="button" onClick={catalog.retry}>Try again</button></div>}
+            {catalog.status === 'error' && <div className="state-box" role="status">
+              <p>{catalog.body ? 'The latest listings could not load. Showing what was available earlier.' : catalog.message}</p>
+              <button className="secondary-button" type="button" onClick={catalog.retry}>Try again</button>
+            </div>}
             {!loading && catalog.status === 'ready' && filtered.length === 0 && <div className="state-box"><h3>{saved ? 'No saved rentals yet' : home ? 'No rentals listed yet' : 'No matching rentals'}</h3>{home
               ? <button className="secondary-button" type="button" onClick={showPosts}>Post the first ad</button>
               : <NavLink href="/" navigate={navigate}>Browse all rentals</NavLink>}</div>}
@@ -816,20 +866,24 @@ export function Marketplace() {
           />
         </Suspense>
       )}
-      {uid && modal?.name === 'post' && <PostRental user={user} ownerUid={uid} ownerAds={myAds} onClose={() => setModal(null)} onPosted={(ad) => { setLocalAds((existing) => [...(existing ?? []), ad]); }} onView={(ad) => { setModal(null); navigate(link({ city: null, listing: ad.slug, saved: null, from: profilePage ? 'profile' : null })); }} />}
+      {uid && modal?.name === 'post' && <PostRental user={user} ownerUid={uid} ownerAds={myAds} onClose={() => setModal(null)} onPosted={(ad) => {
+        updateOwnAds((existing) => [...(existing ?? []), ad]);
+        catalog.invalidate();
+        setAdsAttempt((attempt) => attempt + 1);
+      }} onView={(ad) => { setModal(null); navigate(link({ city: null, listing: ad.slug, saved: null, from: profilePage ? 'profile' : null })); }} />}
       {uid && modal?.name === 'edit-ad' && ownedSlugs.has(modal.item.slug) && (
         <PostRental key={modal.item.slug} user={user} listing={modal.item} ownerAds={myAds} onClose={() => setModal(null)} onUpdated={(item) => {
-          setLocalAds((ads) => ads?.map((ad) => ad.slug === item.slug && ad.ownerUid === uid ? { ...item, available: ad.available } : ad));
+          updateOwnAds((ads) => ads?.map((ad) => ad.slug === item.slug ? { ...item, available: ad.available } : ad));
           setModal(null);
-          catalog.retry();
+          catalog.invalidate();
         }} />
       )}
       {uid && modal?.name === 'delete-ad' && ownedSlugs.has(modal.item.slug) && (
         <DeleteAdDialog item={modal.item} user={user} onClose={() => setModal(null)} onDeleted={(item) => {
-          setLocalAds((ads) => ads?.filter((ad) => ad.slug !== item.slug || ad.ownerUid !== uid));
+          updateOwnAds((ads) => ads?.filter((ad) => ad.slug !== item.slug));
           setModal(null);
           if (slug === item.slug) navigate(detailBackUrl);
-          catalog.retry();
+          catalog.invalidate();
         }} />
       )}
       {uid && modal?.name === 'rent' && selected && selected.available !== false && <ListingContact key={slug} item={selected} user={user} onClose={() => setModal(null)} />}

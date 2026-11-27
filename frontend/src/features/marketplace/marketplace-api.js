@@ -1,22 +1,16 @@
-import { requestSignal } from '../../api/request-signal.js';
-const origin = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
+import { requestJson } from '../../api/api-client.js';
 
 async function accountData(user, path, method = 'GET', body, signal) {
-  const response = await fetch(origin + '/api/v1/account/me' + path, {
+  return requestJson('/account/me' + path, {
     method,
     headers: { Authorization: 'Bearer ' + await user.getIdToken(), ...(body ? { 'Content-Type': 'application/json' } : {}) },
     body: body ? JSON.stringify(body) : undefined,
-    signal: requestSignal(15000, signal),
+    signal,
   });
-  if (!response.ok) {
-    const result = await response.json().catch(() => null);
-    throw Object.assign(new Error(result?.error ?? 'Could not complete your request. Try again.'), { code: result?.code });
-  }
-  return response.status === 204 ? null : response.json();
 }
 
-export async function getOwnerAds(user) {
-  return (await accountData(user, '/ads')).items;
+export async function getOwnerAds(user, signal) {
+  return (await accountData(user, '/ads', 'GET', undefined, signal)).items;
 }
 
 export async function getListingContact(user, slug, signal) {
